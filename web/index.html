@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PICO-R Web</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; display: flex; flex-direction: column;
+    justify-content: center; align-items: center; min-height: 100vh;
+    font-family: -apple-system, sans-serif; color: #fff; }
+  #screen { image-rendering: pixelated; image-rendering: crisp-edges;
+    width: 512px; height: 512px; display: none; }
+  #loader { text-align: center; }
+  #loader.hidden { display: none; }
+  #loader p { color: #888; font-size: 14px; margin-bottom: 20px; }
+  #open-btn { background: #29ADFF; color: #000; border: none; padding: 10px 28px;
+    border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  #open-btn:hover { opacity: 0.85; }
+  #file-input { display: none; }
+  #error { color: #f55; font-size: 13px; margin-top: 12px; display: none; }
+</style>
+</head>
+<body>
+<div id="loader">
+  <p>PICO-R Web Player <span style="color:#666">(Rust port of PICO-Z)</span></p>
+  <button id="open-btn">Open Cart</button>
+  <input type="file" id="file-input" accept=".p8,.png,.p8.png">
+  <p style="color:#666;font-size:12px;margin-top:16px;line-height:1.5">
+    Open a .p8 or .p8.png cart file. Try
+    <a href="https://www.lexaloffle.com/bbs/?tid=2145" style="color:#29ADFF">Celeste Classic</a><br>
+    or browse the
+    <a href="https://www.lexaloffle.com/bbs/?cat=7" style="color:#29ADFF">PICO-8 BBS</a>
+    for games.
+  </p>
+  <div id="error"></div>
+</div>
+<canvas id="screen" width="128" height="128"></canvas>
+
+<script>
+let wasm, ctx, imageData, audioCtx, audioNode;
+const mem = { get buffer() { return wasm ? wasm.memory.buffer : new ArrayBuffer(0); } };
+let buttons = [0, 0];
+let running = false;
+let lastFrameTime = 0;
+let indicatorEnd = 0;
+
+const KEY_MAP = {
+  ArrowLeft:  [0, 0x01], ArrowRight: [0, 0x02], ArrowUp: [0, 0x04], ArrowDown: [0, 0x08],
+  z: [0, 0x10], c: [0, 0x10], n: [0, 0x10],
+  x: [0, 0x20], v: [0, 0x20], m: [0, 0x20],
+  s: [1, 0x01], f: [1, 0x02], e: [1, 0x04], d: [1, 0x08],
+  Tab: [1, 0x10], q: [1, 0x10], w: [1, 0x20],
+};
+
+function openFile() { document.getElementById('file-input').click(); }
+
+function showError(msg) {
+  const el = document.getElementById('error');
+  el.textContent = msg; el.style.display = 'block';
+}
+
+async function init() {
+  document.getElementById('open-btn').addEventListener('click', openFile);
+  document.getElementById('file-input').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) file.arrayBuffer().then(buf => loadCart(new Uint8Array(buf)));
+  });
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('dragenter', (e) => e.preventDefault());
+  document.addEventListener('drop', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const file = e.dataTransfer.files[0];
+    if (file) file.arrayBuffer().then(buf => loadCart(new Uint8Array(buf)));
+  });
+  setupInput();
+
+  try {
+    // Cache-bust so fresh builds aren't served from disk cache.
+    const response = await fetch('pico-r.wasm?v=' + Date.now());
+    const result = await WebAssembly.instantiateStreaming(response, {
+      // Rust on wasm32-unknown-unknown with `std` may import a few WASI-style
+      // symbols if you accidentally pull in std::time / std::env. The current
+      // build only relies on the global allocator (dlmalloc, no imports).
+    });
+    wasm = result.instance.exports;
+    const canvas = document.getElementById('screen');
+    ctx = canvas.getContext('2d');
+    imageData = ctx.createImageData(128, 128);
+  } catch (e) {
+    showError('WASM load failed: ' + e.message);
+    console.error(e);
+  }
+}
+
+function loadCart(bytes) {
+  document.getElementById('error').style.display = 'none';
+  const ptr = wasm.web_alloc(bytes.length);
+  if (!ptr) { showError('Failed to allocate memory'); return; }
+  new Uint8Array(mem.buffer, ptr, bytes.length).set(bytes);
+  const err = wasm.web_init(ptr, bytes.length);
+  wasm.web_free(ptr, bytes.length);
+  if (err !== 0) { showError('Failed to load cart'); return; }
+  document.getElementById('loader').classList.add('hidden');
+  document.getElementById('screen').style.display = 'block';
+  document.getElementById('screen').focus();
+  if (!audioCtx) setupAudio();
+  const wasRunning = running;
+  running = true;
+  lastFrameTime = 0;
+  if (!wasRunning) requestAnimationFrame(frame);
+}
+
+function frame(timestamp) {
+  if (!running) return;
+  const fps = wasm.web_get_fps();
+  const interval = 1000 / fps;
+  if (timestamp - lastFrameTime >= interval - 1) {
+    lastFrameTime = timestamp;
+    wasm.web_set_buttons(0, buttons[0]);
+    wasm.web_set_buttons(1, buttons[1]);
+    wasm.web_update();
+
+    const bufPtr = wasm.web_get_pixel_buffer();
+    const px = new Uint8Array(mem.buffer, bufPtr, 128 * 128 * 4);
+    const rgba = imageData.data;
+    for (let i = 0; i < 128 * 128; i++) {
+      rgba[i * 4 + 0] = px[i * 4 + 2]; // R
+      rgba[i * 4 + 1] = px[i * 4 + 1]; // G
+      rgba[i * 4 + 2] = px[i * 4 + 0]; // B
+      rgba[i * 4 + 3] = 255;
+    }
+
+    if (timestamp < indicatorEnd) {
+      const PALETTE = [
+        [0,0,0],[29,43,83],[126,37,83],[0,135,81],
+        [171,82,54],[95,87,79],[194,195,199],[255,241,232],
+        [255,0,77],[255,163,0],[255,236,39],[0,228,54],
+        [41,173,255],[131,118,156],[255,119,168],[255,204,170]
+      ];
+      const ci = Math.floor((indicatorEnd - timestamp) / 50) % 16;
+      const [cr, cg, cb] = PALETTE[ci];
+      for (let y = 0; y < 128; y++) {
+        for (let x = 0; x < 128; x++) {
+          if (x < 2 || x >= 126 || y < 2 || y >= 126) {
+            const j = (y * 128 + x) * 4;
+            rgba[j] = cr; rgba[j+1] = cg; rgba[j+2] = cb; rgba[j+3] = 255;
+          }
+        }
+      }
+    }
+    ctx.putImageData(imageData, 0, 0);
+  }
+  requestAnimationFrame(frame);
+}
+
+function setupAudio() {
+  audioCtx = new AudioContext();
+  const synthRate = 22050;
+  const ratio = synthRate / audioCtx.sampleRate;
+  const node = audioCtx.createScriptProcessor(2048, 0, 1);
+  node.onaudioprocess = (e) => {
+    const out = e.outputBuffer.getChannelData(0);
+    const needed = Math.ceil(out.length * ratio);
+    const ptr = wasm.web_generate_audio(needed);
+    const src = new Float32Array(mem.buffer, ptr, needed);
+    for (let i = 0; i < out.length; i++) {
+      out[i] = src[Math.min(Math.floor(i * ratio), needed - 1)];
+    }
+  };
+  node.connect(audioCtx.destination);
+  audioNode = node;
+}
+
+function saveStateToStorage() {
+  if (!wasm) return;
+  const len = wasm.web_save_state();
+  if (len === 0) return;
+  const ptr = wasm.web_get_save_ptr();
+  if (!ptr) return;
+  const bytes = new Uint8Array(mem.buffer, ptr, len);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  try { localStorage.setItem('pico-r-save', btoa(binary)); }
+  catch (e) { console.warn('Save failed:', e); }
+  wasm.web_free_save();
+}
+
+function loadStateFromStorage() {
+  if (!wasm) return;
+  const b64 = localStorage.getItem('pico-r-save');
+  if (!b64) return;
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const ptr = wasm.web_alloc(bytes.length);
+  if (!ptr) return;
+  new Uint8Array(mem.buffer, ptr, bytes.length).set(bytes);
+  wasm.web_load_state(ptr, bytes.length);
+  wasm.web_free(ptr, bytes.length);
+}
+
+function setupInput() {
+  document.addEventListener('keydown', (e) => {
+    const m = KEY_MAP[e.key];
+    if (m) { buttons[m[0]] |= m[1]; e.preventDefault(); }
+    if (e.key === 'p' || e.key === 'P') { saveStateToStorage(); indicatorEnd = performance.now() + 2000; e.preventDefault(); }
+    if (e.key === 'l' || e.key === 'L') { loadStateFromStorage(); indicatorEnd = performance.now() + 2000; e.preventDefault(); }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  });
+  document.addEventListener('keyup', (e) => {
+    const m = KEY_MAP[e.key];
+    if (m) { buttons[m[0]] &= ~m[1]; e.preventDefault(); }
+  });
+}
+
+init();
+</script>
+</body>
+</html>

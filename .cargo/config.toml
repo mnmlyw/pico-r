@@ -1,0 +1,5 @@
+# Default target is the host so `cargo check` works without rustup target add.
+# Build for the browser with: `cargo build --release --target wasm32-unknown-unknown`
+
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+bulk-memory"]

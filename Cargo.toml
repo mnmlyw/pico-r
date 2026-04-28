@@ -1,0 +1,42 @@
+[package]
+name = "pico-r"
+version = "0.1.0"
+edition = "2021"
+description = "Pure-WASM Rust port of pico-z (PICO-8 emulator)"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "run-cart"
+path = "tools/run_cart.rs"
+required-features = []
+
+[[bin]]
+name = "dump-pp"
+path = "tools/dump_pp.rs"
+required-features = []
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+panic = "abort"
+
+[dependencies]
+miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+# Optional Lua VM. Enable with `--features piccolo` to wire a real Lua runtime;
+# otherwise the StubEngine in src/lua_engine.rs is used.
+piccolo = { version = "0.3", default-features = false, optional = true }
+gc-arena = { version = "0.5", default-features = false, optional = true }
+
+[features]
+default = []
+piccolo = ["dep:piccolo", "dep:gc-arena"]
