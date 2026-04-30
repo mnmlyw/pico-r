@@ -1,95 +1,76 @@
 # PICO-R
 
-Pure-WASM Rust port of [PICO-Z](https://github.com/mnmlyw/pico-z) — a PICO-8
-emulator. No native build needed: `cargo build --target wasm32-unknown-unknown`
-and serve `web/`.
+A pure-WebAssembly Rust port of [PICO-Z](https://github.com/mnmlyw/pico-z), a PICO-8 emulator. Plays `.p8` and `.p8.png` carts in the browser with no plugins, no Emscripten, no native toolchain — just `cargo build --target wasm32-unknown-unknown`.
 
-## Status
+**▶ [Play in browser](https://mnmlyw.github.io/pico-r/)** — open any `.p8` or `.p8.png` cart directly. No install needed.
 
-| Module | Status |
-|---|---|
-| Memory layout (RAM/ROM, screen, sprite, map) | ✅ ported |
-| Cart loading (`.p8` text + `.p8.png` PNG steganography, PXA + old compression) | ✅ ported |
-| PICO-8 → Lua 5.2 preprocessor (short-if, compound assigns, peek shortcuts, bitwise, etc.) | ✅ ported |
-| Graphics (cls, line, rect, circ, oval, spr, sspr, map, print with P8SCII) | ✅ ported |
-| Audio synthesis (4-channel, 8 waveforms, effects, music) | ✅ ported |
-| Input (button state, btnp repeat) | ✅ ported |
-| Trig tables (z8lua sin/atan2 lookup) | ✅ ported |
-| WASM exports + HTML host | ✅ wired |
-| **Lua VM** | ⚠️ **stub only** — see below |
+To get a cart to try, download [Celeste Classic](https://www.lexaloffle.com/bbs/?tid=2145) or browse the [PICO-8 BBS](https://www.lexaloffle.com/bbs/?cat=7).
 
-## Wiring a real Lua VM
+> PICO-R is a player/emulator only. To make games, get [PICO-8](https://www.lexaloffle.com/pico-8.php) from Lexaloffle.
 
-`src/lua_engine.rs` exposes a `LuaEngine` trait. The default `StubEngine`
-preprocesses cart source but does not execute it — instead it draws a
-"PICO-R / no Lua VM wired" placeholder so you can confirm the WASM/HTML
-pipeline works end-to-end.
+## What's in this repo
 
-To run real carts, implement `LuaEngine` against any pure-Rust Lua VM. The
-two viable options:
+A complete PICO-8 runtime implemented in safe Rust as a single ~360 KB WebAssembly module:
 
-1. **[piccolo](https://crates.io/crates/piccolo)** — pure Rust, full GC.
-   Skeleton dependency is already in `Cargo.toml` behind `--features piccolo`.
-   You'll need to register the PICO-8 API (cls, pset, spr, etc.) using
-   `Callback::from_fn` and store `&mut PicoState` via `UserData` in the
-   Lua registry.
-2. **Hand-rolled subset interpreter** — after the preprocessor, the Lua
-   subset PICO-8 needs is small (no `require`, `io`, `os`, etc.). A
-   tree-walker in ~1500 lines is feasible if piccolo's GC-arena lifetimes
-   are too restrictive for your taste.
-
-The trait surface is minimal:
-
-```rust
-pub trait LuaEngine {
-    fn load_cart(&mut self, state: &mut PicoState, cart: &Cart) -> Result<(), String>;
-    fn call_init(&mut self, state: &mut PicoState);
-    fn call_update(&mut self, state: &mut PicoState);
-    fn call_draw(&mut self, state: &mut PicoState);
-    fn use_60fps(&self) -> bool;
-    fn had_error(&self) -> bool;
-    fn error_message(&self) -> &str;
-}
-```
-
-The PICO-8 API your Lua bindings need to call on `PicoState`:
-graphics functions in `crate::gfx::*`, audio in `state.audio.play_sfx/play_music`,
-RNG in `state.rng_state`, input checks via `state.input.btn(...)`.
+- **Cart loading** — `.p8` text format and `.p8.png` (manual PNG decoder, steganographic byte extraction, PXA + old compression)
+- **Preprocessor** — transforms PICO-8's Lua dialect (short-if/while, compound assignment incl. `^=`, `!=`, peek shortcuts `@`/`%`/`$`, binary literals, bitwise ops `>>`/`<<`/`<<>`/`>>>`/`>><`/`^^`, integer division `\`, `?` print, P8SCII glyph-to-button-ID) to standard Lua 5.2
+- **Hand-rolled Lua VM** — purpose-built lexer + parser + tree-walking interpreter. No piccolo or other Lua VM dependency. Tables with metatables, closures, upvalues, varargs, multi-return, full control flow including `goto`/labels and `repeat..until` with proper body-scope condition evaluation
+- **Graphics** — pset/line/rect/circ (incl. inverted fill)/oval/spr/sspr/map/tline/print with full P8SCII control codes, pal, fillp, clip, camera
+- **Audio** — 4-channel waveform synthesis at 22050 Hz (8 waveforms + custom instruments via child SFX), all 8 SFX effects (slide, vibrato, drop, fade in/out, arpeggio fast/slow), music pattern sequencing with fade
+- **Memory** — flat 65536-byte RAM matching PICO-8 layout (sprites, map, SFX, draw state, screen)
+- **Input** — keyboard via DOM events; `btn`/`btnp` with PICO-8's repeat-config respect from RAM 0x5F5C/0x5F5D
+- **Sandbox** — Lua stdlib subset matching PICO-8 (no `io`, `os`, `debug`, `package`, `require`)
+- **Save/Load** — press **P** to save, **L** to load. Same-session is lossless (deep-clones the Lua globals tree, preserves closures stored in tables, audio channels, RNG); cross-session falls back to byte serialization with the closures-in-tables limitation
 
 ## Build
 
+Requires `rustup` and the wasm32 target.
+
 ```bash
-# One-time toolchain setup (Homebrew Rust does not include the wasm32 target):
+# One-time toolchain setup (Homebrew Rust does NOT include the wasm32 target):
 brew install rustup-init && rustup-init -y
 rustup target add wasm32-unknown-unknown
 
-# Build the WASM module and copy into web/:
+# Build the WASM module and copy it into web/:
 ./build.sh
 
 # Serve the web/ directory locally:
-python3 -m http.server -d web 8000
-# Open http://localhost:8000
+python3 -m http.server -d web 8765
+# Open http://localhost:8765
 ```
+
+`build.sh` will also run `wasm-opt -Oz` if you have it installed (Homebrew: `brew install binaryen`).
 
 ## Architecture
 
-The same shape as PICO-Z, modulo the language change:
+Same shape as PICO-Z, modulo the language change:
 
-- `memory.rs` — flat 65536-byte RAM matching PICO-8 layout
-- `palette.rs` — 32-color palette (16 standard + 16 extended)
-- `cart.rs` — `.p8` section parser + `.p8.png` PNG decoder + PXA decompression
-- `preprocessor.rs` — line-by-line PICO-8 → Lua 5.2 transform
-- `gfx.rs` + `gfx_font.rs` — drawing primitives, sprite blitting, font
-- `audio.rs` — 4-channel synthesis at 22050 Hz, returned to JS as f32 samples
-- `input.rs` — btn state + held-frame counters for btnp repeat
-- `state.rs` — top-level `PicoState` aggregating all of the above
-- `lua_engine.rs` — `LuaEngine` trait + `StubEngine`
-- `lib.rs` — WASM exports (`web_init`, `web_update`, `web_alloc`, …)
+| Module | Lines | Purpose |
+|---|---|---|
+| `memory.rs` | 214 | 65536-byte RAM/ROM, screen/sprite/map indexing |
+| `palette.rs` | 22 | 32-color ARGB palette (16 standard + 16 extended) |
+| `cart.rs` | 609 | `.p8` section parser + `.p8.png` PNG decoder + PXA decompression |
+| `preprocessor.rs` | 1367 | Line-by-line PICO-8 → Lua 5.2 transform |
+| `gfx.rs` + `gfx_font.rs` | 785 | Drawing primitives, sprite blitting, P8SCII font rendering |
+| `audio.rs` | 656 | 4-channel synthesis, returned to JS as f32 samples |
+| `input.rs` | 74 | btn state + held-frame counters for btnp repeat |
+| `state.rs` | 53 | Top-level `PicoState` aggregating engine state |
+| `pico_lua/lex.rs` | 280 | Lua 5.2 tokenizer |
+| `pico_lua/ast.rs` | 60 | AST node types |
+| `pico_lua/parse.rs` | 290 | Recursive-descent parser |
+| `pico_lua/value.rs` | 220 | Value enum, Table with array+hash, deep-clone helpers |
+| `pico_lua/interp.rs` | 470 | Tree-walking evaluator |
+| `pico_lua/api.rs` | 870 | ~80 PICO-8 API functions registered as native callbacks |
+| `pico_lua/serialize.rs` | 165 | Tagged binary save/load for Lua globals |
+| `pico_lua/mod.rs` | 130 | LuaEngine trait impl, env-fallback shim |
+| `lib.rs` | 285 | WASM exports, frame loop, in-memory snapshot |
+| `web/index.html` | — | Drop-in cart loader, keyboard input, audio resampler, save UI |
 
-## Exports
+The output is a single self-contained `.wasm` with **zero JS imports** — Rust's `dlmalloc` is the global allocator, all I/O goes through explicit exports.
 
-The WASM module exports the same surface as PICO-Z's web build, so
-`web/index.html` can drive it the same way:
+## WASM exports
+
+The module exports the same surface as PICO-Z's web build:
 
 | Export | Purpose |
 |---|---|
@@ -99,13 +80,57 @@ The WASM module exports the same surface as PICO-Z's web build, so
 | `web_get_pixel_buffer()` | Pointer to the 128×128 ARGB pixel buffer |
 | `web_set_buttons(player, bits)` | Set button state for player 0 or 1 |
 | `web_set_mouse(x, y, btns, wheel)` | Mouse state |
-| `web_generate_audio(n_samples)` | Returns a pointer to n f32 audio samples |
+| `web_generate_audio(n)` | Returns a pointer to `n` f32 audio samples at 22050 Hz |
 | `web_get_fps()` | 30 or 60 |
 | `web_save_state()` / `web_get_save_ptr()` / `web_free_save()` / `web_load_state(ptr, len)` | Quick save/load |
+| `web_has_error()` | 1 if the Lua VM hit an error |
+
+## Controls
+
+| Key | Action |
+|---|---|
+| Arrow keys | D-pad |
+| Z / C / N | O button |
+| X / V / M | X button |
+| S F E D | Player 2 D-pad |
+| Tab / Q / W | Player 2 buttons |
+| P | Save state (lossless within session) |
+| L | Load state |
+
+## Tooling
+
+There's a host-side cart runner for fast iteration without browser round-trips:
+
+```bash
+cargo run --bin run-cart --release -- /path/to/cart.p8.png 200
+```
+
+Loads a cart, simulates pressing X for the first 8 frames (to advance past the title), runs N frames, and prints the first error with line info:
+
+```
+UPDATE ERROR (frame 81): cart:2032 in _update: compare nil with number
+```
+
+This is how the `repeat..until`-scope and broken-`all()`-iterator bugs were diagnosed during development.
+
+A sibling `cargo run --bin dump-pp --release` writes the preprocessed Lua source to `/tmp/celeste2_preprocessed.lua` so you can `sed -n '2030,2040p'` and see the actual code at the failing line.
+
+## Compatibility
+
+Tested with [Celeste Classic 2](https://www.lexaloffle.com/bbs/?tid=41339) and other community carts.
+
+**Known limitations:**
+- **No coroutines.** Carts using `flip()` / `cocreate` / `coresume` / `yield` for their own frame loop won't work. Carts using the standard `_init`/`_update`/`_draw` lifecycle (the dominant pattern) run fine.
+- **Numbers are f64, not bit-exact 16:16 fixed-point.** Pure-arithmetic carts won't notice; carts that rely on overflow tricks at exactly ±32768 or specific `tostr(n, 0x1)` hex formats may misbehave at edges.
+- **`string.find`/`match`/`gmatch`/`gsub`** not implemented — rare in PICO-8 carts; `split`/`sub`/`chr`/`ord` cover most cases.
+- **Cross-session save/load drops closures stored in tables** (the same-session in-memory snapshot path preserves them).
 
 ## Credits
 
-This is a Rust rewrite of [PICO-Z](https://github.com/mnmlyw/pico-z) by mnmlyw,
-which was itself an independent reimplementation of the PICO-8 runtime.
-PICO-8 itself is by Joseph White / Lexaloffle. Trig tables are from
-[z8lua](https://github.com/samhocevar/z8lua) by Sam Hocevar (WTFPL).
+- **[PICO-Z](https://github.com/mnmlyw/pico-z)** by mnmlyw — the Zig PICO-8 emulator this project was ported from. The architecture, preprocessor, gfx, and audio designs are theirs; this port is a Rust rewrite that drops native build tooling.
+- **[PICO-8](https://www.lexaloffle.com/pico-8.php)** by [Joseph White / Lexaloffle](https://www.lexaloffle.com/) — the original. PICO-R is not affiliated.
+- **[z8lua](https://github.com/samhocevar/z8lua)** by Sam Hocevar (WTFPL) — bit-exact `sin`/`atan2` lookup tables.
+
+## License
+
+MIT.
