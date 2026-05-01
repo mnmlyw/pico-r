@@ -154,16 +154,35 @@ impl LuaEngine for LuaImpl {
             self.call_global(b"_init");
         }
         self.interp.host = std::ptr::null_mut();
+        // _init may install lifecycle hooks dynamically (e.g. start_title sets
+        // _update60 = update_title), so re-detect after running it.
+        self.detect_lifecycle();
     }
     fn call_update(&mut self, state: &mut PicoState) {
         self.interp.host = state as *mut PicoState;
-        if self.has_update60 { self.call_global(b"_update60"); }
-        else if self.has_update { self.call_global(b"_update"); }
+        // Dynamic lookup per frame — carts can swap _update/_update60 at runtime.
+        let has60 = matches!(
+            self.interp.globals.borrow().get(&Value::Str(Rc::from(b"_update60".as_slice()))),
+            Value::Function(_)
+        );
+        if has60 {
+            self.call_global(b"_update60");
+        } else if matches!(
+            self.interp.globals.borrow().get(&Value::Str(Rc::from(b"_update".as_slice()))),
+            Value::Function(_)
+        ) {
+            self.call_global(b"_update");
+        }
         self.interp.host = std::ptr::null_mut();
     }
     fn call_draw(&mut self, state: &mut PicoState) {
         self.interp.host = state as *mut PicoState;
-        if self.has_draw { self.call_global(b"_draw"); }
+        if matches!(
+            self.interp.globals.borrow().get(&Value::Str(Rc::from(b"_draw".as_slice()))),
+            Value::Function(_)
+        ) {
+            self.call_global(b"_draw");
+        }
         self.interp.host = std::ptr::null_mut();
     }
     fn use_60fps(&self) -> bool { self.has_update60 }

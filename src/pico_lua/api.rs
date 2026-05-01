@@ -1253,8 +1253,14 @@ fn api_btn(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         return Ok(vec![num((p0 | p1) as f64)]);
     }
     let b = (arg_int(&a, 0).unwrap_or(0) as u8) & 7;
-    let p = (opt_int(&a, 1, 0) as u8) & 1;
-    Ok(vec![boolv(st.input.btn(b, p))])
+    // We only track 2 players; PICO-8 supports up to 8 — for any unsupported
+    // player slot return false (NOT alias to p & 1, which would make higher
+    // player numbers spuriously read player 0/1 state).
+    let p_raw = opt_int(&a, 1, 0) as u32;
+    if p_raw > 1 {
+        return Ok(vec![boolv(false)]);
+    }
+    Ok(vec![boolv(st.input.btn(b, p_raw as u8))])
 }
 fn api_btnp(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let st = i.host();
@@ -1268,8 +1274,11 @@ fn api_btnp(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         return Ok(vec![num((p0 | (p1 << 8)) as f64)]);
     }
     let b = (arg_int(&a, 0).unwrap_or(0) as u8) & 7;
-    let p = (opt_int(&a, 1, 0) as u8) & 1;
-    Ok(vec![boolv(st.input.btnp(b, p, &st.memory))])
+    let p_raw = opt_int(&a, 1, 0) as u32;
+    if p_raw > 1 {
+        return Ok(vec![boolv(false)]);
+    }
+    Ok(vec![boolv(st.input.btnp(b, p_raw as u8, &st.memory))])
 }
 
 // === Memory ===

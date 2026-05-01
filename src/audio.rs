@@ -177,6 +177,19 @@ impl Audio {
             return;
         }
 
+        // sfx(N, -2): release the loop of any channel currently playing
+        // SFX N. Carts pair this with sfx(N) for fresh starts, and call
+        // sfx(N, -2) alone to STOP a loop without starting a new one. Without
+        // this the sound loops forever (e.g. mansion_bros' vacuum SFX).
+        if channel_req == -2 {
+            for i in 0..NUM_CHANNELS {
+                if self.channels[i].sfx_id as i32 == sfx_id {
+                    self.release_loop(i);
+                }
+            }
+            return;
+        }
+
         let ch: usize = if channel_req >= 0 && (channel_req as usize) < NUM_CHANNELS {
             channel_req as usize
         } else {
@@ -439,7 +452,7 @@ impl Audio {
                 } else {
                     oscillate(child_wf, self.channels[i].inst_phase)
                 };
-                let inst_out = sample * combined_vol * 0.25;
+                let inst_out = sample * combined_vol * 0.5;
                 if is_music_ch {
                     music_mix += inst_out;
                 } else {
@@ -473,7 +486,10 @@ impl Audio {
                 } else {
                     oscillate(self.channels[i].waveform, self.channels[i].phase)
                 };
-                let ch_out = sample * self.channels[i].volume * 0.25;
+                // Per-channel scaling: 0.5 keeps 4 channels under +/-2 (clipped
+                // to +/-1 at the final mix). PICO-8/picolove output noticeably
+                // louder than 0.25 did; 0.5 is closer.
+                let ch_out = sample * self.channels[i].volume * 0.5;
                 if is_music_ch {
                     music_mix += ch_out;
                 } else {
@@ -577,6 +593,12 @@ impl Audio {
         }
         for ch_i in 0..4 {
             if self.music_state.channel_mask & (1 << ch_i) == 0 {
+                continue;
+            }
+            // Disabled channels (0x40 bit set in pattern byte) were never
+            // started, so their `finished` flag stays false forever; treat
+            // them as already-done by skipping them.
+            if self.channels[ch_i].sfx_id < 0 {
                 continue;
             }
             if !self.channels[ch_i].finished {

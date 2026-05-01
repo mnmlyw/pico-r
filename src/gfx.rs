@@ -112,8 +112,9 @@ pub fn render_to_argb(memory: &Memory, pixel_buffer: &mut [u32; SCREEN_W * SCREE
 pub fn cls(state: &mut PicoState, col: u8) {
     let c = col & 0x0F;
     let byte = c | (c << 4);
-    let start = memory::ADDR_SCREEN as usize;
-    let end = memory::ADDR_SCREEN_END as usize;
+    // Honor 0x5F55 in case the cart has redirected the screen base.
+    let start = state.memory.screen_base() as usize;
+    let end = (start + 0x2000).min(memory::RAM_SIZE);
     for i in start..end {
         state.memory.ram[i] = byte;
     }
@@ -373,15 +374,40 @@ pub fn sspr(
     if dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 {
         return;
     }
+    if sw > 256 || sh > 256 {
+        return;
+    }
     let (cam_x, cam_y) = get_camera(memory);
+
+    // Snapshot the source rectangle first. When sprite source and screen
+    // destination overlap (e.g. bigprint's "scale up the just-drawn text"
+    // trick that pokes 0x5F54=0x60), iterating in place would overwrite
+    // source pixels before we've read them. PICO-8 reads atomically; mimic.
+    let src_w = sw as usize;
+    let src_h = sh as usize;
+    let mut src_buf: Vec<u8> = vec![0u8; src_w * src_h];
+    for sj in 0..sh {
+        for si in 0..sw {
+            let ax = sx + si;
+            let ay = sy + sj;
+            let idx = (sj as usize) * src_w + (si as usize);
+            if ax < 0 || ax >= 128 || ay < 0 || ay >= 128 {
+                src_buf[idx] = 0;
+            } else {
+                src_buf[idx] = memory.sprite_get(ax as u8, ay as u8);
+            }
+        }
+    }
+
     for py in 0..dh {
         for px in 0..dw {
-            let src_x = sx + (if flip_x { dw - 1 - px } else { px }) * sw / dw;
-            let src_y = sy + (if flip_y { dh - 1 - py } else { py }) * sh / dh;
-            if src_x < 0 || src_x >= 128 || src_y < 0 || src_y >= 128 {
+            let sx_off = (if flip_x { dw - 1 - px } else { px }) * sw / dw;
+            let sy_off = (if flip_y { dh - 1 - py } else { py }) * sh / dh;
+            if sx_off < 0 || sx_off >= sw || sy_off < 0 || sy_off >= sh {
                 continue;
             }
-            let col = memory.sprite_get(src_x as u8, src_y as u8);
+            let buf_idx = (sy_off as usize) * src_w + (sx_off as usize);
+            let col = src_buf[buf_idx];
             if is_transparent(memory, col) {
                 continue;
             }
@@ -538,8 +564,8 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
                                 let clear_col = parse_hex_color(text[i]);
                                 i += 1;
                                 let byte = clear_col | (clear_col << 4);
-                                let s = memory::ADDR_SCREEN as usize;
-                                let e = memory::ADDR_SCREEN_END as usize;
+                                let s = memory.screen_base() as usize;
+                                let e = (s + 0x2000).min(memory::RAM_SIZE);
                                 for k in s..e {
                                     memory.ram[k] = byte;
                                 }

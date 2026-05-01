@@ -324,6 +324,14 @@ fn process_line(
         if ch >= 0x80 {
             if let Some(s) = p8scii_button_id(ch) {
                 out.extend_from_slice(s);
+            } else {
+                // PICO-8 treats high-byte glyphs as identifier characters; map
+                // each byte deterministically to a Lua-safe identifier so code
+                // like `fills = {A,B,...}` (glyph variable names) parses.
+                let hex = b"0123456789abcdef";
+                out.extend_from_slice(b"_p8_");
+                out.push(hex[(ch >> 4) as usize]);
+                out.push(hex[(ch & 0x0f) as usize]);
             }
             i += 1;
             continue;
@@ -642,7 +650,7 @@ fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
                             .position(|&b| b != b' ' && b != b'\t')
                             .unwrap_or(line.len() - body_start);
                         let rest_after_body = &line[body_start + trimmed_offset..];
-                        if !rest_after_body.is_empty() {
+                        if !rest_after_body.is_empty() && !is_continuation_body(rest_after_body) {
                             result.extend_from_slice(keyword);
                             result.push(b' ');
                             result.extend_from_slice(&line[j + 1..k]);
@@ -669,6 +677,38 @@ fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
         result.extend_from_slice(b" end");
     }
     Some(result)
+}
+
+// Returns true if the body after `if (cond)` looks like a multi-line
+// condition continuation rather than a short-if body — i.e. starts with
+// a binary keyword like `or`/`and` so the real `then` is on a later line.
+fn is_continuation_body(rest: &[u8]) -> bool {
+    let trimmed_start = rest
+        .iter()
+        .position(|&b| b != b' ' && b != b'\t')
+        .unwrap_or(rest.len());
+    let trimmed_end = rest
+        .iter()
+        .rposition(|&b| b != b' ' && b != b'\t' && b != b'\r' && b != b'\n')
+        .map(|p| p + 1)
+        .unwrap_or(0);
+    if trimmed_start >= trimmed_end {
+        return false;
+    }
+    let trimmed = &rest[trimmed_start..trimmed_end];
+    for kw in [b"or" as &[u8], b"and"] {
+        if trimmed.len() >= kw.len() && &trimmed[..kw.len()] == kw {
+            let after = if trimmed.len() > kw.len() {
+                trimmed[kw.len()]
+            } else {
+                b' '
+            };
+            if !after.is_ascii_alphanumeric() && after != b'_' {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn has_separator_keyword(text: &[u8], sep: &[u8]) -> bool {
