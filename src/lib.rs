@@ -2,6 +2,7 @@
 // the alloc/no_std import dance and is fine for binary-size targets.
 
 #![allow(dead_code)] // Many fields/funcs are exposed for the future Lua API.
+#![deny(unsafe_op_in_unsafe_fn)]
 
 use std::cell::UnsafeCell;
 use std::mem::MaybeUninit;
@@ -110,7 +111,62 @@ fn engine_init() -> &'static mut Engine {
     }
 }
 
+// === Panic capture ===
+//
+// With `panic = "abort"`, a panic traps the WASM module and the JS side gets
+// no message — just "unreachable executed". Install a hook that writes the
+// panic location + message into a static buffer the JS side can read via
+// `web_get_panic_msg` / `web_get_panic_len`.
+
+const PANIC_BUF_SIZE: usize = 1024;
+
+struct PanicBuf {
+    inner: UnsafeCell<[u8; PANIC_BUF_SIZE]>,
+    len: UnsafeCell<usize>,
+}
+
+unsafe impl Sync for PanicBuf {}
+
+static PANIC_BUF: PanicBuf = PanicBuf {
+    inner: UnsafeCell::new([0; PANIC_BUF_SIZE]),
+    len: UnsafeCell::new(0),
+};
+
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let s = format!("{info}");
+        let bytes = s.as_bytes();
+        let n = bytes.len().min(PANIC_BUF_SIZE);
+        // Safety: WASM is single-threaded; only the panicking thread writes here.
+        unsafe {
+            let buf = &mut *PANIC_BUF.inner.get();
+            buf[..n].copy_from_slice(&bytes[..n]);
+            *PANIC_BUF.len.get() = n;
+        }
+    }));
+}
+
 // === Exported WASM API ===
+
+/// Install the WASM panic hook so panics surface a readable message instead
+/// of a bare `unreachable` trap. JS should call this once on startup.
+#[no_mangle]
+pub extern "C" fn web_init_panic_hook() {
+    install_panic_hook();
+}
+
+/// Pointer to the captured panic message buffer.
+#[no_mangle]
+pub extern "C" fn web_get_panic_msg() -> *const u8 {
+    PANIC_BUF.inner.get() as *const u8
+}
+
+/// Length of the captured panic message (0 if no panic has occurred).
+#[no_mangle]
+pub extern "C" fn web_get_panic_len() -> u32 {
+    // Safety: WASM is single-threaded.
+    unsafe { *PANIC_BUF.len.get() as u32 }
+}
 
 #[no_mangle]
 pub extern "C" fn web_alloc(len: u32) -> *mut u8 {

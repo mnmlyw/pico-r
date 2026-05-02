@@ -40,11 +40,21 @@ jobs:
       - name: Check host build
         run: cargo check --locked --all-targets
 
+      # `cargo test` runs in the default (dev) profile, since [profile.release]
+      # uses panic=abort and the test harness needs unwind for catch_unwind.
       - name: Run tests
         run: cargo test --locked
 
       - name: Run Clippy
         run: cargo clippy --locked --all-targets -- -A warnings -D clippy::correctness -D clippy::suspicious
+
+      - name: cargo-deny (advisories, bans, licenses)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans licenses
+
+      - name: Install binaryen (wasm-opt)
+        run: sudo apt-get update && sudo apt-get install -y binaryen
 
       - name: Build wasm (release)
         run: cargo build --locked --release --target wasm32-unknown-unknown
@@ -54,12 +64,33 @@ jobs:
           mkdir -p out
           cp web/index.html out/
           cp target/wasm32-unknown-unknown/release/pico_r.wasm out/pico-r.wasm
+          wasm-opt -Oz -o out/pico-r.wasm out/pico-r.wasm
           ls -lh out/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: out
+
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: web-artifact
+      - run: |
+          # Pages artifact is a tar; extract into web/.
+          mkdir -p web
+          tar -xf web-artifact/artifact.tar -C web
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: cd tools/e2e && npm install --no-audit --no-fund
+      - run: node tools/e2e/smoke.mjs
 
   deploy:
     needs: build

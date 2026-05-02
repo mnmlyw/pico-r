@@ -1,0 +1,53 @@
+name: Release run-cart binaries
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, suffix: linux-x64 }
+          - { os: macos-latest, target: aarch64-apple-darwin, suffix: macos-arm64 }
+          - { os: macos-latest, target: x86_64-apple-darwin, suffix: macos-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build run-cart
+        run: cargo build --locked --release --bin run-cart --target ${{ matrix.target }}
+
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/run-cart dist/run-cart-${{ matrix.suffix }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-cart-${{ matrix.suffix }}
+          path: dist/run-cart-${{ matrix.suffix }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

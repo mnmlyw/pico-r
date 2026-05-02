@@ -8,7 +8,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-cargo build --release --target wasm32-unknown-unknown
+cargo build --locked --release --target wasm32-unknown-unknown
 
 OUT_WASM="target/wasm32-unknown-unknown/release/pico_r.wasm"
 DEST="web/pico-r.wasm"
