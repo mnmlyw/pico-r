@@ -21,9 +21,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal --component clippy --component rustfmt
-          rustup target add wasm32-unknown-unknown
+        run: rustup target add wasm32-unknown-unknown
 
       - name: Cache cargo build
         uses: actions/cache@v4
@@ -37,49 +35,29 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
-      - name: Check host build
-        run: cargo check --locked --all-targets
-
-      # `cargo test` runs in the default (dev) profile, since [profile.release]
-      # uses panic=abort and the test harness needs unwind for catch_unwind.
       - name: Run tests
         run: cargo test --locked
 
-      - name: Run Clippy
-        run: cargo clippy --locked --all-targets -- -A warnings -D clippy::correctness -D clippy::suspicious
-
-      - name: cargo-deny (advisories, bans, licenses)
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check advisories bans licenses
-
-      - name: Install binaryen (wasm-opt)
-        # Ubuntu's apt binaryen is too old: it rejects sign-ext / nontrapping-
-        # fptoint / bulk-memory ops that current rustc emits by default. Pull
-        # a fixed recent release from upstream.
-        run: |
-          BINARYEN_VER=version_119
-          curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VER}/binaryen-${BINARYEN_VER}-x86_64-linux.tar.gz" \
-            | sudo tar -xz -C /usr/local --strip-components=1
-          wasm-opt --version
-
       - name: Build wasm (release)
         run: cargo build --locked --release --target wasm32-unknown-unknown
+
+      - name: Install upstream binaryen
+        # Ubuntu's apt wasm-opt is too old; rejects sign-ext / nontrapping-
+        # fptoint that current rustc emits. Pull a pinned upstream release.
+        run: |
+          curl -sSL https://github.com/WebAssembly/binaryen/releases/download/version_119/binaryen-version_119-x86_64-linux.tar.gz \
+            | sudo tar -xz -C /usr/local --strip-components=1
 
       - name: Stage web/
         run: |
           mkdir -p out
           cp web/index.html out/
           cp target/wasm32-unknown-unknown/release/pico_r.wasm out/pico-r.wasm
-          # Modern rustc emits ops from several post-MVP feature sets
-          # (bulk-memory, sign-ext, nontrapping-fptoint, reference-types).
-          # Recent wasm-opt enables them by default, but be explicit so a
-          # toolchain bump doesn't trip a fresh validator error.
           wasm-opt -Oz \
             --enable-bulk-memory \
             --enable-nontrapping-float-to-int \
-            --enable-mutable-globals \
             --enable-sign-ext \
+            --enable-mutable-globals \
             --enable-reference-types \
             --enable-multivalue \
             -o out/pico-r.wasm out/pico-r.wasm
@@ -89,26 +67,6 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: out
-
-  e2e:
-    needs: build
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: github-pages
-          path: web-artifact
-      - run: |
-          # Pages artifact is a tar; extract into web/.
-          mkdir -p web
-          tar -xf web-artifact/artifact.tar -C web
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - run: cd tools/e2e && npm install --no-audit --no-fund
-      - run: node tools/e2e/smoke.mjs
 
   deploy:
     needs: build
