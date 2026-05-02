@@ -1,6 +1,6 @@
 # PICO-R
 
-A pure-WebAssembly Rust rewrite of [PICO-Z](https://github.com/mnmlyw/pico-z), a PICO-8 emulator. Plays `.p8` and `.p8.png` carts in the browser with no plugins, no Emscripten, no native toolchain — just `cargo build --target wasm32-unknown-unknown`.
+A pure-WebAssembly PICO-8 emulator in Rust. Plays `.p8` and `.p8.png` carts in the browser with no plugins, no Emscripten, no native toolchain — just `cargo build --target wasm32-unknown-unknown`. PICO-R focuses entirely on the WASM target; PICO-8 compatibility fixes are periodically synced from the sibling Zig project [PICO-Z](https://github.com/mnmlyw/pico-z), but everything else evolves independently.
 
 **▶ [Play in browser](https://mnmlyw.github.io/pico-r/)** — open any `.p8` or `.p8.png` cart directly. No install needed.
 
@@ -42,8 +42,6 @@ python3 -m http.server -d web 8765
 
 ## Architecture
 
-Same shape as PICO-Z, modulo the language change:
-
 | Module | Lines | Purpose |
 |---|---|---|
 | `memory.rs` | 214 | 65536-byte RAM/ROM, screen/sprite/map indexing |
@@ -69,7 +67,7 @@ The output is a single self-contained `.wasm` with **zero JS imports** — Rust'
 
 ## WASM exports
 
-The module exports the same surface as the PICO-Z web build:
+The WASM module exports:
 
 | Export | Purpose |
 |---|---|
@@ -126,7 +124,7 @@ Tested with [Celeste Classic 2](https://www.lexaloffle.com/bbs/?tid=41339) and o
 
 ## Credits
 
-- **[PICO-Z](https://github.com/mnmlyw/pico-z)** — the Zig PICO-8 emulator this project is a Rust rewrite of. PICO-R drops the native build tooling and ziglua dependency in favor of a hand-rolled Lua VM and pure-WASM output.
+- **[PICO-Z](https://github.com/mnmlyw/pico-z)** — sibling Zig PICO-8 emulator. PICO-R borrows from its PICO-8 compatibility layer; the WASM-only architecture, hand-rolled Lua VM, and rest of the engine are independent.
 - **[PICO-8](https://www.lexaloffle.com/pico-8.php)** by [Joseph White / Lexaloffle](https://www.lexaloffle.com/) — the original. PICO-R is not affiliated.
 - **[z8lua](https://github.com/samhocevar/z8lua)** by Sam Hocevar (WTFPL) — bit-exact `sin`/`atan2` lookup tables.
 

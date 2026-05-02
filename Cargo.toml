@@ -2,7 +2,7 @@
 name = "pico-r"
 version = "0.1.0"
 edition = "2021"
-description = "Pure-WASM Rust rewrite of pico-z (PICO-8 emulator)"
+description = "Pure-WASM PICO-8 emulator in Rust"
 license = "MIT"
 publish = false
 
