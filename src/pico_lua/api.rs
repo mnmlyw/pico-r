@@ -1031,8 +1031,8 @@ fn api_all(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
         }
     };
     // Closure-captured state. Generic-for passes (state, control) but we
-    // ignore both — the captured state is the source of truth. This makes
-    // us robust to PICO-Z's env-fallback `wrap` shim that re-wraps `all`.
+    // ignore both — the captured state is the source of truth. This keeps
+    // us robust to the env-fallback `wrap` shim that re-wraps `all`.
     let state: Rc<RefCell<(Rc<Table>, i64, i64)>> =
         Rc::new(RefCell::new((Rc::clone(&t), 0i64, t.borrow().raw_len())));
     let iter = Value::Function(Function::Native(Rc::new(NativeFn {

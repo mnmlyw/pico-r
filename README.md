@@ -1,6 +1,6 @@
 # PICO-R
 
-A pure-WebAssembly Rust port of [PICO-Z](https://github.com/mnmlyw/pico-z), a PICO-8 emulator. Plays `.p8` and `.p8.png` carts in the browser with no plugins, no Emscripten, no native toolchain — just `cargo build --target wasm32-unknown-unknown`.
+A pure-WebAssembly Rust rewrite of [PICO-Z](https://github.com/mnmlyw/pico-z), a PICO-8 emulator. Plays `.p8` and `.p8.png` carts in the browser with no plugins, no Emscripten, no native toolchain — just `cargo build --target wasm32-unknown-unknown`.
 
 **▶ [Play in browser](https://mnmlyw.github.io/pico-r/)** — open any `.p8` or `.p8.png` cart directly. No install needed.
 
@@ -69,7 +69,7 @@ The output is a single self-contained `.wasm` with **zero JS imports** — Rust'
 
 ## WASM exports
 
-The module exports the same surface as PICO-Z's web build:
+The module exports the same surface as the PICO-Z web build:
 
 | Export | Purpose |
 |---|---|
@@ -126,7 +126,7 @@ Tested with [Celeste Classic 2](https://www.lexaloffle.com/bbs/?tid=41339) and o
 
 ## Credits
 
-- **[PICO-Z](https://github.com/mnmlyw/pico-z)** by mnmlyw — the Zig PICO-8 emulator this project was ported from. The architecture, preprocessor, gfx, and audio designs are theirs; this port is a Rust rewrite that drops native build tooling.
+- **[PICO-Z](https://github.com/mnmlyw/pico-z)** — the Zig PICO-8 emulator this project is a Rust rewrite of. PICO-R drops the native build tooling and ziglua dependency in favor of a hand-rolled Lua VM and pure-WASM output.
 - **[PICO-8](https://www.lexaloffle.com/pico-8.php)** by [Joseph White / Lexaloffle](https://www.lexaloffle.com/) — the original. PICO-R is not affiliated.
 - **[z8lua](https://github.com/samhocevar/z8lua)** by Sam Hocevar (WTFPL) — bit-exact `sin`/`atan2` lookup tables.
 

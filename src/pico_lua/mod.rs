@@ -139,8 +139,8 @@ impl LuaEngine for LuaImpl {
         });
 
         // Install the env-fallback shim before user code runs (so `all()` results
-        // used as _ENV resolve globals via __index=_G). The original PICO-Z does
-        // this via Lua source; we replicate it.
+        // used as _ENV resolve globals via __index=_G). PICO-Z does this via Lua
+        // source; we replicate it.
         let shim = b"do local mt={__index=_G} local rawall=all local rawforeach=foreach \
             local sm=setmetatable local gm=getmetatable local tp=type \
             local function wrap(v) if tp(v)==\"table\" and not gm(v) then sm(v,mt) end return v end \
