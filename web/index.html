@@ -8,34 +8,82 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #000; display: flex; flex-direction: column;
     justify-content: center; align-items: center; min-height: 100vh;
-    font-family: -apple-system, sans-serif; color: #fff; }
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    color: #fff; padding: 24px 16px; }
   #screen { image-rendering: pixelated; image-rendering: crisp-edges;
-    width: 512px; height: 512px; display: none; }
-  #loader { text-align: center; }
+    width: min(512px, 90vw); height: min(512px, 90vw); display: none;
+    border-radius: 4px; }
+  #loader { text-align: center; max-width: 460px; }
   #loader.hidden { display: none; }
-  #loader p { color: #888; font-size: 14px; margin-bottom: 20px; }
-  #open-btn { background: #29ADFF; color: #000; border: none; padding: 10px 28px;
-    border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.02em;
+    margin-bottom: 6px; }
+  h1 .accent { color: #29ADFF; }
+  .subtitle { color: #888; font-size: 13px; margin-bottom: 24px; }
+  .lead { color: #bbb; font-size: 14px; line-height: 1.55; margin-bottom: 22px; }
+  .lead a { color: #29ADFF; text-decoration: none; }
+  .lead a:hover { text-decoration: underline; }
+  #open-btn { background: #29ADFF; color: #000; border: none; padding: 11px 30px;
+    border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer;
+    transition: opacity 0.12s; }
   #open-btn:hover { opacity: 0.85; }
+  .drop-hint { color: #555; font-size: 12px; margin-top: 10px; }
   #file-input { display: none; }
   #error { color: #f55; font-size: 13px; margin-top: 12px; display: none; }
+  .controls { margin-top: 28px; padding-top: 22px; border-top: 1px solid #1a1a1a;
+    color: #999; font-size: 12px; line-height: 1.7; text-align: left; }
+  .controls h2 { color: #ccc; font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+  .controls table { width: 100%; border-collapse: collapse; }
+  .controls td { padding: 2px 0; vertical-align: top; }
+  .controls td:first-child { color: #ccc; white-space: nowrap; padding-right: 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+  .footer { margin-top: 22px; color: #444; font-size: 11px; }
+  .footer a { color: #666; text-decoration: none; }
+  .footer a:hover { color: #888; }
 </style>
 </head>
 <body>
 <div id="loader">
-  <p>PICO-R Web Player <span style="color:#666">(Pure-WASM Rust)</span></p>
+  <h1>PICO-<span class="accent">R</span></h1>
+  <div class="subtitle">PICO-8 emulator in pure-WASM Rust</div>
+  <p class="lead">
+    Drop a <code>.p8</code> or <code>.p8.png</code> cart anywhere on this page,
+    or click below to pick one. Try
+    <a href="https://www.lexaloffle.com/bbs/?tid=2145">Celeste Classic</a>
+    or browse the
+    <a href="https://www.lexaloffle.com/bbs/?cat=7">PICO-8 BBS</a>.
+  </p>
   <button id="open-btn">Open Cart</button>
   <input type="file" id="file-input" accept=".p8,.png,.p8.png">
-  <p style="color:#666;font-size:12px;margin-top:16px;line-height:1.5">
-    Open a .p8 or .p8.png cart file. Try
-    <a href="https://www.lexaloffle.com/bbs/?tid=2145" style="color:#29ADFF">Celeste Classic</a><br>
-    or browse the
-    <a href="https://www.lexaloffle.com/bbs/?cat=7" style="color:#29ADFF">PICO-8 BBS</a>
-    for games.
-  </p>
+  <div class="drop-hint">…or drag &amp; drop a cart anywhere</div>
   <div id="error"></div>
+
+  <div class="controls">
+    <h2>Controls</h2>
+    <table>
+      <tr><td>Arrows</td><td>D-pad</td></tr>
+      <tr><td>Z / C / N</td><td>O button</td></tr>
+      <tr><td>X / V / M</td><td>X button</td></tr>
+      <tr><td>P</td><td>Save state</td></tr>
+      <tr><td>L</td><td>Load state</td></tr>
+    </table>
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;color:#777;font-size:11px">Player 2 keys</summary>
+      <table style="margin-top:6px">
+        <tr><td>S F E D</td><td>D-pad</td></tr>
+        <tr><td>Tab / Q</td><td>O button</td></tr>
+        <tr><td>W</td><td>X button</td></tr>
+      </table>
+    </details>
+  </div>
+
+  <div class="footer">
+    <a href="https://github.com/mnmlyw/pico-r">github.com/mnmlyw/pico-r</a>
+    &nbsp;·&nbsp;
+    Not affiliated with <a href="https://www.lexaloffle.com/pico-8.php">PICO-8</a>
+  </div>
 </div>
-<canvas id="screen" width="128" height="128"></canvas>
+<canvas id="screen" width="128" height="128" tabindex="0"></canvas>
 
 <script>
 let wasm, ctx, imageData, audioCtx, audioNode;
