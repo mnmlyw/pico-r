@@ -67,4 +67,34 @@ fn main() {
     let screen = &state.memory.ram[0x6000..0x8000];
     let nonzero = screen.iter().filter(|&&b| b != 0).count();
     eprintln!("screen: {} / 8192 bytes nonzero", nonzero);
+
+    // Sanity-check audio engine: pull 22050 samples (1 second) and report
+    // peak amplitude + nonzero count. Catches "engine never produces audio".
+    let mut peak: f32 = 0.0;
+    let mut nonzero_samples = 0usize;
+    for _ in 0..22050 {
+        let s = state.audio.generate_sample(&state.memory);
+        if s.abs() > peak {
+            peak = s.abs();
+        }
+        if s != 0.0 {
+            nonzero_samples += 1;
+        }
+    }
+    eprintln!(
+        "audio: peak={:.4} nonzero={}/22050 music_pattern={} channels=[{}]",
+        peak,
+        nonzero_samples,
+        state.audio.music_state.pattern,
+        state
+            .audio
+            .channels
+            .iter()
+            .map(|c| format!(
+                "sfx={} fin={} vol={:.2}",
+                c.sfx_id, c.finished, c.volume
+            ))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    );
 }
