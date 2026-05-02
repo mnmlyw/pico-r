@@ -54,7 +54,14 @@ jobs:
           command: check advisories bans licenses
 
       - name: Install binaryen (wasm-opt)
-        run: sudo apt-get update && sudo apt-get install -y binaryen
+        # Ubuntu's apt binaryen is too old: it rejects sign-ext / nontrapping-
+        # fptoint / bulk-memory ops that current rustc emits by default. Pull
+        # a fixed recent release from upstream.
+        run: |
+          BINARYEN_VER=version_119
+          curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VER}/binaryen-${BINARYEN_VER}-x86_64-linux.tar.gz" \
+            | sudo tar -xz -C /usr/local --strip-components=1
+          wasm-opt --version
 
       - name: Build wasm (release)
         run: cargo build --locked --release --target wasm32-unknown-unknown
@@ -64,16 +71,17 @@ jobs:
           mkdir -p out
           cp web/index.html out/
           cp target/wasm32-unknown-unknown/release/pico_r.wasm out/pico-r.wasm
-          # Rust on wasm32-unknown-unknown emits i32.trunc_sat_f64_s
-          # (nontrapping-fptoint) and bulk-memory ops; both are part of the
-          # WebAssembly MVP+ extensions that all browsers support but the
-          # Ubuntu binaryen package's wasm-opt rejects unless explicitly
-          # enabled. `--enable-bulk-memory --enable-nontrapping-float-to-int`
-          # tells wasm-opt those features are allowed.
+          # Modern rustc emits ops from several post-MVP feature sets
+          # (bulk-memory, sign-ext, nontrapping-fptoint, reference-types).
+          # Recent wasm-opt enables them by default, but be explicit so a
+          # toolchain bump doesn't trip a fresh validator error.
           wasm-opt -Oz \
             --enable-bulk-memory \
             --enable-nontrapping-float-to-int \
             --enable-mutable-globals \
+            --enable-sign-ext \
+            --enable-reference-types \
+            --enable-multivalue \
             -o out/pico-r.wasm out/pico-r.wasm
           ls -lh out/
 
