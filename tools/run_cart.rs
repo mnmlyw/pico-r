@@ -90,10 +90,7 @@ fn main() {
             .audio
             .channels
             .iter()
-            .map(|c| format!(
-                "sfx={} fin={} vol={:.2}",
-                c.sfx_id, c.finished, c.volume
-            ))
+            .map(|c| format!("sfx={} fin={} vol={:.2}", c.sfx_id, c.finished, c.volume))
             .collect::<Vec<_>>()
             .join(" | ")
     );

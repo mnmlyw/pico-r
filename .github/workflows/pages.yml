@@ -64,7 +64,17 @@ jobs:
           mkdir -p out
           cp web/index.html out/
           cp target/wasm32-unknown-unknown/release/pico_r.wasm out/pico-r.wasm
-          wasm-opt -Oz -o out/pico-r.wasm out/pico-r.wasm
+          # Rust on wasm32-unknown-unknown emits i32.trunc_sat_f64_s
+          # (nontrapping-fptoint) and bulk-memory ops; both are part of the
+          # WebAssembly MVP+ extensions that all browsers support but the
+          # Ubuntu binaryen package's wasm-opt rejects unless explicitly
+          # enabled. `--enable-bulk-memory --enable-nontrapping-float-to-int`
+          # tells wasm-opt those features are allowed.
+          wasm-opt -Oz \
+            --enable-bulk-memory \
+            --enable-nontrapping-float-to-int \
+            --enable-mutable-globals \
+            -o out/pico-r.wasm out/pico-r.wasm
           ls -lh out/
 
       - name: Upload Pages artifact
