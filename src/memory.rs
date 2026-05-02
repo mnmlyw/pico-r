@@ -41,6 +41,12 @@ pub struct Memory {
     pub rom: [u8; RAM_SIZE],
 }
 
+impl Default for Memory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Memory {
     pub fn new() -> Self {
         let mut m = Self {

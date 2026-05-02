@@ -1,7 +1,6 @@
 // PICO-8 Lua dialect → standard Lua 5.2 preprocessor.
 // Faithful port of preprocessor.zig.
 
-
 pub fn preprocess(source: &str) -> String {
     let mut out: Vec<u8> = Vec::with_capacity(source.len());
     let mut in_long_comment = false;
@@ -179,9 +178,7 @@ fn insert_number_spaces(source: &[u8]) -> Vec<u8> {
                 }
             }
             result.extend_from_slice(&source[i..end]);
-            if end < source.len()
-                && (source[end].is_ascii_alphabetic() || source[end] == b'_')
-            {
+            if end < source.len() && (source[end].is_ascii_alphabetic() || source[end] == b'_') {
                 result.push(b' ');
             }
             i = end;
@@ -208,7 +205,9 @@ fn is_number_start(line: &[u8], i: usize) -> bool {
     let ch = line[i];
     if ch.is_ascii_digit() {
         return i == 0
-            || (!line[i - 1].is_ascii_alphanumeric() && line[i - 1] != b'_' && line[i - 1] != b'.');
+            || (!line[i - 1].is_ascii_alphanumeric()
+                && line[i - 1] != b'_'
+                && line[i - 1] != b'.');
     }
     if ch == b'.' && i + 1 < line.len() && line[i + 1].is_ascii_digit() {
         return i == 0
@@ -218,7 +217,7 @@ fn is_number_start(line: &[u8], i: usize) -> bool {
 }
 
 fn is_hex(b: u8) -> bool {
-    b.is_ascii_digit() || (b >= b'a' && b <= b'f') || (b >= b'A' && b <= b'F')
+    b.is_ascii_digit() || (b'a'..=b'f').contains(&b) || (b'A'..=b'F').contains(&b)
 }
 
 fn process_line(
@@ -229,7 +228,10 @@ fn process_line(
     in_long_string: &mut bool,
     long_string_level: &mut usize,
 ) {
-    let trimmed_start = line.iter().position(|&b| b != b' ' && b != b'\t').unwrap_or(line.len());
+    let trimmed_start = line
+        .iter()
+        .position(|&b| b != b' ' && b != b'\t')
+        .unwrap_or(line.len());
     let trimmed = &line[trimmed_start..];
 
     if !trimmed.is_empty() && trimmed[0] == b'?' {
@@ -388,21 +390,22 @@ fn process_line(
         }
 
         // Binary literals 0b...
-        if ch == b'0' && i + 1 < line.len() && (line[i + 1] == b'b' || line[i + 1] == b'B') {
-            if i == 0 || !line[i - 1].is_ascii_alphanumeric() {
-                let mut end = i + 2;
-                while end < line.len()
-                    && (line[end] == b'0' || line[end] == b'1' || line[end] == b'.')
-                {
-                    end += 1;
-                }
-                if end > i + 2 {
-                    let val = parse_binary_literal(&line[i + 2..end]);
-                    let s = format!("{}", val);
-                    out.extend_from_slice(s.as_bytes());
-                    i = end;
-                    continue;
-                }
+        if ch == b'0'
+            && i + 1 < line.len()
+            && (line[i + 1] == b'b' || line[i + 1] == b'B')
+            && (i == 0 || !line[i - 1].is_ascii_alphanumeric())
+        {
+            let mut end = i + 2;
+            while end < line.len() && (line[end] == b'0' || line[end] == b'1' || line[end] == b'.')
+            {
+                end += 1;
+            }
+            if end > i + 2 {
+                let val = parse_binary_literal(&line[i + 2..end]);
+                let s = format!("{}", val);
+                out.extend_from_slice(s.as_bytes());
+                i = end;
+                continue;
             }
         }
 
@@ -516,7 +519,19 @@ fn parse_binary_literal(s: &[u8]) -> f64 {
 fn is_valid_lua52_escape(ch: u8) -> bool {
     matches!(
         ch,
-        b'a' | b'b' | b'f' | b'n' | b'r' | b't' | b'v' | b'\\' | b'"' | b'\'' | b'[' | b']' | b'z' | b'x'
+        b'a' | b'b'
+            | b'f'
+            | b'n'
+            | b'r'
+            | b't'
+            | b'v'
+            | b'\\'
+            | b'"'
+            | b'\''
+            | b'['
+            | b']'
+            | b'z'
+            | b'x'
     ) || ch.is_ascii_digit()
 }
 
@@ -543,8 +558,7 @@ fn match_keyword_at(line: &[u8], pos: usize, keyword: &[u8]) -> bool {
         return false;
     }
     if pos + keyword.len() < line.len()
-        && (line[pos + keyword.len()].is_ascii_alphanumeric()
-            || line[pos + keyword.len()] == b'_')
+        && (line[pos + keyword.len()].is_ascii_alphanumeric() || line[pos + keyword.len()] == b'_')
     {
         return false;
     }
@@ -591,13 +605,14 @@ fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
             break;
         }
 
-        let kw_info: Option<(&[u8], usize, &[u8])> = if ch == b'i' && match_keyword_at(line, i, b"if") {
-            Some((b"if", 2, b"then"))
-        } else if ch == b'w' && match_keyword_at(line, i, b"while") {
-            Some((b"while", 5, b"do"))
-        } else {
-            None
-        };
+        let kw_info: Option<(&[u8], usize, &[u8])> =
+            if ch == b'i' && match_keyword_at(line, i, b"if") {
+                Some((b"if", 2, b"then"))
+            } else if ch == b'w' && match_keyword_at(line, i, b"while") {
+                Some((b"while", 5, b"do"))
+            } else {
+                None
+            };
 
         if let Some((keyword, len, separator)) = kw_info {
             let mut j = i + len;
@@ -735,11 +750,9 @@ fn has_separator_keyword(text: &[u8], sep: &[u8]) -> bool {
             break;
         }
         if j + sep.len() <= text.len() && &text[j..j + sep.len()] == sep {
-            let before_ok = j == 0
-                || (!text[j - 1].is_ascii_alphanumeric() && text[j - 1] != b'_');
+            let before_ok = j == 0 || (!text[j - 1].is_ascii_alphanumeric() && text[j - 1] != b'_');
             let after_ok = j + sep.len() >= text.len()
-                || (!text[j + sep.len()].is_ascii_alphanumeric()
-                    && text[j + sep.len()] != b'_');
+                || (!text[j + sep.len()].is_ascii_alphanumeric() && text[j + sep.len()] != b'_');
             if before_ok && after_ok {
                 return true;
             }
@@ -902,10 +915,11 @@ fn extract_rhs(line: &[u8], start: usize) -> RhsResult<'_> {
                 while peek < line.len() && (line[peek] == b' ' || line[peek] == b'\t') {
                     peek += 1;
                 }
-                if peek < line.len() && (line[peek].is_ascii_alphabetic() || line[peek] == b'_') {
-                    if !is_operator_keyword(line, peek) {
-                        break;
-                    }
+                if peek < line.len()
+                    && (line[peek].is_ascii_alphabetic() || line[peek] == b'_')
+                    && !is_operator_keyword(line, peek)
+                {
+                    break;
                 }
             }
         }
@@ -916,10 +930,7 @@ fn extract_rhs(line: &[u8], start: usize) -> RhsResult<'_> {
                 continue;
             }
             let mut lhs_end = i;
-            if matches!(
-                prev,
-                b'+' | b'-' | b'*' | b'/' | b'%' | b'\\' | b'|' | b'&'
-            ) {
+            if matches!(prev, b'+' | b'-' | b'*' | b'/' | b'%' | b'\\' | b'|' | b'&') {
                 lhs_end = i - 1;
             }
             if lhs_end >= 2 {
@@ -1104,18 +1115,7 @@ fn extract_bitwise_rhs(line: &[u8], start: usize) -> ExprResult<'_> {
         if depth == 0 {
             if matches!(
                 ch,
-                b','
-                    | b';'
-                    | b' '
-                    | b'\t'
-                    | b'>'
-                    | b'<'
-                    | b'='
-                    | b'~'
-                    | b'&'
-                    | b'|'
-                    | b'}'
-                    | b'{'
+                b',' | b';' | b' ' | b'\t' | b'>' | b'<' | b'=' | b'~' | b'&' | b'|' | b'}' | b'{'
             ) {
                 break;
             }
@@ -1149,8 +1149,7 @@ fn try_compound_assign(line: &[u8], pos: usize, out: &mut Vec<u8>) -> Option<usi
     if ch == b'.' && pos + 2 < line.len() && line[pos + 1] == b'.' && line[pos + 2] == b'=' {
         op = b"..";
         op_len = 3;
-    } else if ch == b'^' && pos + 2 < line.len() && line[pos + 1] == b'^' && line[pos + 2] == b'='
-    {
+    } else if ch == b'^' && pos + 2 < line.len() && line[pos + 1] == b'^' && line[pos + 2] == b'=' {
         is_func = true;
         func_name = b"bxor";
         op_len = 3;

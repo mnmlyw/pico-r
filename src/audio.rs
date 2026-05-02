@@ -60,6 +60,12 @@ pub struct Channel {
     pub loop_released: bool,
 }
 
+impl Default for Channel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Channel {
     pub const fn new() -> Self {
         Self {
@@ -103,6 +109,12 @@ pub struct MusicState {
     pub fade_out: bool,
 }
 
+impl Default for MusicState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MusicState {
     pub const fn new() -> Self {
         Self {
@@ -123,6 +135,12 @@ pub struct Audio {
     pub channels: [Channel; NUM_CHANNELS],
     pub music_state: MusicState,
     pub noise_seed: u32,
+}
+
+impl Default for Audio {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Audio {
@@ -173,7 +191,7 @@ impl Audio {
             }
             return;
         }
-        if sfx_id < 0 || sfx_id >= 64 {
+        if !(0..64).contains(&sfx_id) {
             return;
         }
 
@@ -231,7 +249,8 @@ impl Audio {
     pub fn play_music(&mut self, memory: &Memory, pattern: i32, fade_ms: i32, mask: i32) {
         if pattern < 0 {
             if fade_ms > 0 && self.music_state.playing {
-                self.music_state.fade_samples = ((fade_ms as u64) * SAMPLE_RATE as u64 / 1000) as u32;
+                self.music_state.fade_samples =
+                    ((fade_ms as u64) * SAMPLE_RATE as u64 / 1000) as u32;
                 self.music_state.fade_progress = 0;
                 self.music_state.fade_out = true;
             } else {
@@ -371,8 +390,8 @@ impl Audio {
             if self.channels[i].finished || self.channels[i].sfx_id < 0 {
                 continue;
             }
-            let is_music_ch = self.music_state.playing
-                && (self.music_state.channel_mask & (1 << i) != 0);
+            let is_music_ch =
+                self.music_state.playing && (self.music_state.channel_mask & (1 << i) != 0);
             let sfx_base = memory::ADDR_SFX as usize + self.channels[i].sfx_id as usize * 68;
 
             // Compute effect-adjusted freq/vol
@@ -434,8 +453,8 @@ impl Audio {
 
             let sample: f32;
             if self.channels[i].custom {
-                let inst_base = memory::ADDR_SFX as usize
-                    + self.channels[i].inst_sfx_id as usize * 68;
+                let inst_base =
+                    memory::ADDR_SFX as usize + self.channels[i].inst_sfx_id as usize * 68;
                 let (cn_pitch, cn_wf, cn_vol, _) = self.read_note_raw(
                     memory,
                     self.channels[i].inst_sfx_id,
@@ -474,8 +493,7 @@ impl Audio {
                         } else {
                             self.channels[i].inst_note_index = 31;
                         }
-                    } else if inst_loop_end > 0
-                        && self.channels[i].inst_note_index >= inst_loop_end
+                    } else if inst_loop_end > 0 && self.channels[i].inst_note_index >= inst_loop_end
                     {
                         self.channels[i].inst_note_index = inst_loop_start;
                     }
@@ -509,9 +527,7 @@ impl Audio {
                 self.channels[i].sub_tick = 0.0;
                 self.channels[i].note_index += 1;
 
-                if self.music_state.playing
-                    && self.music_state.channel_mask & (1 << i) != 0
-                {
+                if self.music_state.playing && self.music_state.channel_mask & (1 << i) != 0 {
                     let mut first = 0usize;
                     for c_i in 0..NUM_CHANNELS {
                         if self.music_state.channel_mask & (1 << c_i) != 0
@@ -562,8 +578,7 @@ impl Audio {
             }
             if self.music_state.fade_samples > 0 {
                 let fade_vol = 1.0
-                    - self.music_state.fade_progress as f32
-                        / self.music_state.fade_samples as f32;
+                    - self.music_state.fade_progress as f32 / self.music_state.fade_samples as f32;
                 music_mix *= fade_vol;
             }
         }
@@ -582,8 +597,7 @@ impl Audio {
         self.channels[ch].noise_prev_sample = self.channels[ch].noise_sample;
         self.channels[ch].noise_sample =
             (self.channels[ch].noise_prev_sample + scale * rand) / (1.0 + scale);
-        ((prev_s + self.channels[ch].noise_sample) * 4.0 / 3.0 * (1.75 - scale))
-            .clamp(-1.0, 1.0)
+        ((prev_s + self.channels[ch].noise_sample) * 4.0 / 3.0 * (1.75 - scale)).clamp(-1.0, 1.0)
             * 0.7
     }
 
@@ -639,7 +653,11 @@ fn oscillate(waveform: Waveform, phase: f64) -> f32 {
     match waveform {
         Waveform::Triangle => {
             let p = (phase % 1.0).abs() as f32;
-            (if p < 0.5 { p * 4.0 - 1.0 } else { 3.0 - p * 4.0 }) * 0.7
+            (if p < 0.5 {
+                p * 4.0 - 1.0
+            } else {
+                3.0 - p * 4.0
+            }) * 0.7
         }
         Waveform::TiltedSaw => {
             let t = (phase % 1.0).abs() as f32;
@@ -655,11 +673,19 @@ fn oscillate(waveform: Waveform, phase: f64) -> f32 {
         }
         Waveform::Square => {
             let p = (phase % 1.0).abs() as f32;
-            if p < 0.5 { 1.0 / 3.0 } else { -1.0 / 3.0 }
+            if p < 0.5 {
+                1.0 / 3.0
+            } else {
+                -1.0 / 3.0
+            }
         }
         Waveform::Pulse => {
             let p = (phase % 1.0).abs() as f32;
-            if p < 0.3125 { 1.0 / 3.0 } else { -1.0 / 3.0 }
+            if p < 0.3125 {
+                1.0 / 3.0
+            } else {
+                -1.0 / 3.0
+            }
         }
         Waveform::Organ => {
             let x = phase * 4.0;

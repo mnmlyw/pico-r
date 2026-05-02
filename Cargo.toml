@@ -27,16 +27,5 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
-[profile.dev]
-panic = "abort"
-
 [dependencies]
 miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
-# Optional Lua VM. Enable with `--features piccolo` to wire a real Lua runtime;
-# otherwise the StubEngine in src/lua_engine.rs is used.
-piccolo = { version = "0.3", default-features = false, optional = true }
-gc-arena = { version = "0.5", default-features = false, optional = true }
-
-[features]
-default = []
-piccolo = ["dep:piccolo", "dep:gc-arena"]

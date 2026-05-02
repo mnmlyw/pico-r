@@ -15,48 +15,80 @@ use crate::state::PicoState;
 
 // === Helpers ===
 
-fn rc_str(s: &str) -> Rc<[u8]> { Rc::from(s.as_bytes()) }
-fn nil() -> Value { Value::Nil }
-fn num(n: f64) -> Value { Value::Number(n) }
-fn boolv(b: bool) -> Value { Value::Bool(b) }
-fn str_v(b: &[u8]) -> Value { Value::Str(Rc::from(b)) }
+fn rc_str(s: &str) -> Rc<[u8]> {
+    Rc::from(s.as_bytes())
+}
+fn nil() -> Value {
+    Value::Nil
+}
+fn num(n: f64) -> Value {
+    Value::Number(n)
+}
+fn boolv(b: bool) -> Value {
+    Value::Bool(b)
+}
+fn str_v(b: &[u8]) -> Value {
+    Value::Str(Rc::from(b))
+}
 
 fn arg_num(args: &[Value], i: usize) -> Option<f64> {
     args.get(i).and_then(|v| v.as_number())
 }
 fn arg_int(args: &[Value], i: usize) -> Option<i32> {
-    arg_num(args, i).map(|f| safe_to_i32(f))
+    arg_num(args, i).map(safe_to_i32)
 }
 fn opt_int(args: &[Value], i: usize, d: i32) -> i32 {
-    if i >= args.len() || matches!(args[i], Value::Nil) { d } else { arg_int(args, i).unwrap_or(d) }
+    if i >= args.len() || matches!(args[i], Value::Nil) {
+        d
+    } else {
+        arg_int(args, i).unwrap_or(d)
+    }
 }
 fn opt_num(args: &[Value], i: usize, d: f64) -> f64 {
-    if i >= args.len() || matches!(args[i], Value::Nil) { d } else { arg_num(args, i).unwrap_or(d) }
+    if i >= args.len() || matches!(args[i], Value::Nil) {
+        d
+    } else {
+        arg_num(args, i).unwrap_or(d)
+    }
 }
 fn opt_bool(args: &[Value], i: usize, d: bool) -> bool {
-    if i >= args.len() || matches!(args[i], Value::Nil) { d } else { args[i].truthy() }
+    if i >= args.len() || matches!(args[i], Value::Nil) {
+        d
+    } else {
+        args[i].truthy()
+    }
 }
 fn arg_str(args: &[Value], i: usize) -> Option<Rc<[u8]>> {
     args.get(i).and_then(|v| v.as_str())
 }
 
 fn safe_to_i32(f: f64) -> i32 {
-    if f.is_nan() { return 0; }
-    if f >= i32::MAX as f64 { return i32::MAX; }
-    if f <= i32::MIN as f64 { return i32::MIN; }
+    if f.is_nan() {
+        return 0;
+    }
+    if f >= i32::MAX as f64 {
+        return i32::MAX;
+    }
+    if f <= i32::MIN as f64 {
+        return i32::MIN;
+    }
     f as i32
 }
 
 fn to_fixed(v: f64) -> i32 {
     let scaled = v * 65536.0;
-    if scaled.is_nan() { return 0; }
+    if scaled.is_nan() {
+        return 0;
+    }
     if scaled > i32::MAX as f64 || scaled < i32::MIN as f64 {
         let wide = scaled as i64;
         return wide as i32;
     }
     scaled as i32
 }
-fn from_fixed(v: i32) -> f64 { v as f64 / 65536.0 }
+fn from_fixed(v: i32) -> f64 {
+    v as f64 / 65536.0
+}
 
 // === Color helper for gfx ===
 
@@ -73,13 +105,17 @@ fn get_color(state: &mut PicoState, args: &[Value], i: usize) -> u8 {
 
 pub fn register_all(globals: &Rc<Table>) {
     let mut g = globals.borrow_mut();
-    let mut set = |name: &'static str, f: fn(&mut Interp, Vec<Value>) -> Result<Vec<Value>, RtError>| {
-        let nf = Rc::new(NativeFn {
-            name,
-            func: Box::new(f),
-        });
-        g.set(Value::Str(rc_str(name)), Value::Function(Function::Native(nf)));
-    };
+    let mut set =
+        |name: &'static str, f: fn(&mut Interp, Vec<Value>) -> Result<Vec<Value>, RtError>| {
+            let nf = Rc::new(NativeFn {
+                name,
+                func: Box::new(f),
+            });
+            g.set(
+                Value::Str(rc_str(name)),
+                Value::Function(Function::Native(nf)),
+            );
+        };
 
     // === stdlib ===
     set("type", lua_type);
@@ -212,9 +248,13 @@ pub fn register_all(globals: &Rc<Table>) {
     let strtab = Rc::new(RefCell::new(TableInner::new()));
     {
         let mut s = strtab.borrow_mut();
-        let make = |name: &'static str, f: fn(&mut Interp, Vec<Value>) -> Result<Vec<Value>, RtError>| {
-            Value::Function(Function::Native(Rc::new(NativeFn { name, func: Box::new(f) })))
-        };
+        let make =
+            |name: &'static str, f: fn(&mut Interp, Vec<Value>) -> Result<Vec<Value>, RtError>| {
+                Value::Function(Function::Native(Rc::new(NativeFn {
+                    name,
+                    func: Box::new(f),
+                })))
+            };
         s.set(str_v(b"sub"), make("sub", api_sub));
         s.set(str_v(b"len"), make("len", str_len));
         s.set(str_v(b"lower"), make("lower", str_lower));
@@ -222,13 +262,17 @@ pub fn register_all(globals: &Rc<Table>) {
         s.set(str_v(b"rep"), make("rep", str_rep));
         s.set(str_v(b"format"), make("format", str_format));
     }
-    globals.borrow_mut().set(str_v(b"string"), Value::Table(strtab));
+    globals
+        .borrow_mut()
+        .set(str_v(b"string"), Value::Table(strtab));
 }
 
 // === stdlib bodies ===
 
 fn lua_type(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    if args.is_empty() { return Ok(vec![]); }
+    if args.is_empty() {
+        return Ok(vec![]);
+    }
     Ok(vec![str_v(args[0].type_name().as_bytes())])
 }
 
@@ -236,7 +280,13 @@ fn lua_tostring(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError
     let v = args.into_iter().next().unwrap_or(Value::Nil);
     let s = match &v {
         Value::Nil => "nil".to_string(),
-        Value::Bool(b) => if *b { "true".into() } else { "false".into() },
+        Value::Bool(b) => {
+            if *b {
+                "true".into()
+            } else {
+                "false".into()
+            }
+        }
         Value::Number(n) => number_to_str(*n),
         Value::Str(b) => return Ok(vec![Value::Str(Rc::clone(b))]),
         Value::Table(t) => format!("table: 0x{:x}", Rc::as_ptr(t) as usize),
@@ -247,7 +297,10 @@ fn lua_tostring(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError
 
 fn lua_tonumber(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = args.first().cloned().unwrap_or(Value::Nil);
-    Ok(vec![match v.as_number() { Some(n) => num(n), None => nil() }])
+    Ok(vec![match v.as_number() {
+        Some(n) => num(n),
+        None => nil(),
+    }])
 }
 
 fn lua_pairs(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -277,7 +330,7 @@ fn lua_ipairs(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> 
     let iter = Value::Function(Function::Native(Rc::new(NativeFn {
         name: "ipairs_iter",
         func: Box::new(|_i, args| {
-            let t = args.get(0).cloned().unwrap_or(Value::Nil);
+            let t = args.first().cloned().unwrap_or(Value::Nil);
             let i = args.get(1).and_then(|v| v.as_number()).unwrap_or(0.0) as i64;
             let next = i + 1;
             if let Value::Table(tbl) = &t {
@@ -294,7 +347,7 @@ fn lua_ipairs(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> 
 }
 
 fn lua_next(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let t = match args.get(0) {
+    let t = match args.first() {
         Some(Value::Table(t)) => t.clone(),
         _ => return Err(RtError::msg("next: not a table")),
     };
@@ -311,7 +364,9 @@ fn lua_next(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
             return Ok(vec![key_to_value(k), v]);
         }
         if let Some(pk) = &prev_keyed {
-            if k == pk { found = true; }
+            if k == pk {
+                found = true;
+            }
         }
     }
     Ok(vec![nil()])
@@ -328,21 +383,31 @@ fn key_to_value(k: &Key) -> Value {
 }
 
 fn lua_select(_i: &mut Interp, mut args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    if args.is_empty() { return Err(RtError::msg("select: missing args")); }
+    if args.is_empty() {
+        return Err(RtError::msg("select: missing args"));
+    }
     let first = args.remove(0);
     if let Value::Str(s) = &first {
         if &**s == b"#" {
             return Ok(vec![num(args.len() as f64)]);
         }
     }
-    let i = first.as_number().ok_or_else(|| RtError::msg("select: bad index"))? as i64;
+    let i = first
+        .as_number()
+        .ok_or_else(|| RtError::msg("select: bad index"))? as i64;
     let n = args.len() as i64;
-    let start = if i < 0 { (n + i).max(0) } else { (i - 1).max(0) };
+    let start = if i < 0 {
+        (n + i).max(0)
+    } else {
+        (i - 1).max(0)
+    };
     Ok(args.into_iter().skip(start as usize).collect())
 }
 
 fn lua_setmetatable(_i: &mut Interp, mut args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    if args.len() < 2 { return Err(RtError::msg("setmetatable: 2 args")); }
+    if args.len() < 2 {
+        return Err(RtError::msg("setmetatable: 2 args"));
+    }
     let mt = args.pop().unwrap();
     let t = args.pop().unwrap();
     if let Value::Table(tbl) = &t {
@@ -359,7 +424,7 @@ fn lua_setmetatable(_i: &mut Interp, mut args: Vec<Value>) -> Result<Vec<Value>,
 }
 
 fn lua_getmetatable(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    if let Some(Value::Table(t)) = args.get(0) {
+    if let Some(Value::Table(t)) = args.first() {
         if let Some(mt) = &t.borrow().metatable {
             return Ok(vec![Value::Table(Rc::clone(mt))]);
         }
@@ -368,14 +433,16 @@ fn lua_getmetatable(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtE
 }
 
 fn lua_rawget(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    if let (Some(Value::Table(t)), Some(k)) = (args.get(0), args.get(1)) {
+    if let (Some(Value::Table(t)), Some(k)) = (args.first(), args.get(1)) {
         return Ok(vec![t.borrow().get(k)]);
     }
     Ok(vec![nil()])
 }
 
 fn lua_rawset(_i: &mut Interp, mut args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    if args.len() < 3 { return Err(RtError::msg("rawset: 3 args")); }
+    if args.len() < 3 {
+        return Err(RtError::msg("rawset: 3 args"));
+    }
     let v = args.pop().unwrap();
     let k = args.pop().unwrap();
     let t = args.pop().unwrap();
@@ -387,13 +454,13 @@ fn lua_rawset(_i: &mut Interp, mut args: Vec<Value>) -> Result<Vec<Value>, RtErr
 }
 
 fn lua_rawequal(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let a = args.get(0).cloned().unwrap_or(Value::Nil);
+    let a = args.first().cloned().unwrap_or(Value::Nil);
     let b = args.get(1).cloned().unwrap_or(Value::Nil);
     Ok(vec![boolv(a.raw_equal(&b))])
 }
 
 fn lua_rawlen(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    match args.get(0) {
+    match args.first() {
         Some(Value::Str(s)) => Ok(vec![num(s.len() as f64)]),
         Some(Value::Table(t)) => Ok(vec![num(t.borrow().raw_len() as f64)]),
         _ => Err(RtError::msg("rawlen: needs table or string")),
@@ -406,7 +473,9 @@ fn lua_error(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 
 fn lua_pcall(i: &mut Interp, mut args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    if args.is_empty() { return Err(RtError::msg("pcall: missing function")); }
+    if args.is_empty() {
+        return Err(RtError::msg("pcall: missing function"));
+    }
     let f = args.remove(0);
     match i.call_value(&f, args) {
         Ok(mut vs) => {
@@ -419,9 +488,12 @@ fn lua_pcall(i: &mut Interp, mut args: Vec<Value>) -> Result<Vec<Value>, RtError
 }
 
 fn lua_assert(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let v = args.get(0).cloned().unwrap_or(Value::Nil);
+    let v = args.first().cloned().unwrap_or(Value::Nil);
     if !v.truthy() {
-        let msg = args.get(1).cloned().unwrap_or(Value::Str(rc_str("assertion failed!")));
+        let msg = args
+            .get(1)
+            .cloned()
+            .unwrap_or(Value::Str(rc_str("assertion failed!")));
         return Err(RtError { value: msg });
     }
     Ok(args)
@@ -453,21 +525,29 @@ fn api_cos(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_atan2(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let dx = arg_num(&a, 0).unwrap_or(0.0);
     let dy = arg_num(&a, 1).unwrap_or(0.0);
-    if dx == 0.0 && dy == 0.0 { return Ok(vec![num(0.25)]); }
+    if dx == 0.0 && dy == 0.0 {
+        return Ok(vec![num(0.25)]);
+    }
     // PICO-8 atan2 returns turns in [0,1) with y inverted
     let r = (-dy).atan2(dx);
     let mut t = r / std::f64::consts::TAU;
-    if t < 0.0 { t += 1.0; }
+    if t < 0.0 {
+        t += 1.0;
+    }
     Ok(vec![num(t)])
 }
 fn api_max(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let mut r = arg_num(&a, 0).unwrap_or(0.0);
-    for j in 1..a.len() { r = r.max(a[j].as_number().unwrap_or(0.0)); }
+    for v in a.iter().skip(1) {
+        r = r.max(v.as_number().unwrap_or(0.0));
+    }
     Ok(vec![num(r)])
 }
 fn api_min(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let mut r = arg_num(&a, 0).unwrap_or(0.0);
-    for j in 1..a.len() { r = r.min(a[j].as_number().unwrap_or(0.0)); }
+    for v in a.iter().skip(1) {
+        r = r.min(v.as_number().unwrap_or(0.0));
+    }
     Ok(vec![num(r)])
 }
 fn api_mid(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -477,9 +557,11 @@ fn api_mid(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![num(x.min(y).max(x.max(y).min(z)))])
 }
 fn api_rnd(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    if let Some(Value::Table(t)) = a.get(0) {
+    if let Some(Value::Table(t)) = a.first() {
         let len = t.borrow().raw_len();
-        if len == 0 { return Ok(vec![nil()]); }
+        if len == 0 {
+            return Ok(vec![nil()]);
+        }
         let r = xorshift(i) % len as u32;
         let v = t.borrow().get(&num((r + 1) as f64));
         return Ok(vec![v]);
@@ -496,7 +578,9 @@ fn api_srand(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 fn xorshift(i: &mut Interp) -> u32 {
     let host = i.host();
-    if host.rng_state == 0 { host.rng_state = 0x12345678; }
+    if host.rng_state == 0 {
+        host.rng_state = 0x12345678;
+    }
     let mut s = host.rng_state;
     s ^= s << 13;
     s ^= s >> 17;
@@ -512,27 +596,43 @@ fn api_sgn(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 // === Bitwise (16:16 fixed) ===
 
 fn api_band(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    Ok(vec![num(from_fixed(to_fixed(arg_num(&a, 0).unwrap_or(0.0)) & to_fixed(arg_num(&a, 1).unwrap_or(0.0))))])
+    Ok(vec![num(from_fixed(
+        to_fixed(arg_num(&a, 0).unwrap_or(0.0)) & to_fixed(arg_num(&a, 1).unwrap_or(0.0)),
+    ))])
 }
 fn api_bor(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    Ok(vec![num(from_fixed(to_fixed(arg_num(&a, 0).unwrap_or(0.0)) | to_fixed(arg_num(&a, 1).unwrap_or(0.0))))])
+    Ok(vec![num(from_fixed(
+        to_fixed(arg_num(&a, 0).unwrap_or(0.0)) | to_fixed(arg_num(&a, 1).unwrap_or(0.0)),
+    ))])
 }
 fn api_bxor(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    Ok(vec![num(from_fixed(to_fixed(arg_num(&a, 0).unwrap_or(0.0)) ^ to_fixed(arg_num(&a, 1).unwrap_or(0.0))))])
+    Ok(vec![num(from_fixed(
+        to_fixed(arg_num(&a, 0).unwrap_or(0.0)) ^ to_fixed(arg_num(&a, 1).unwrap_or(0.0)),
+    ))])
 }
 fn api_bnot(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    Ok(vec![num(from_fixed(!to_fixed(arg_num(&a, 0).unwrap_or(0.0))))])
+    Ok(vec![num(from_fixed(!to_fixed(
+        arg_num(&a, 0).unwrap_or(0.0),
+    )))])
 }
 fn api_shl(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let x = to_fixed(arg_num(&a, 0).unwrap_or(0.0));
     let b = arg_int(&a, 1).unwrap_or(0);
-    let r = if b >= 0 { x.wrapping_shl((b.min(31)) as u32) } else { x.wrapping_shr(((-b).min(31)) as u32) };
+    let r = if b >= 0 {
+        x.wrapping_shl((b.min(31)) as u32)
+    } else {
+        x.wrapping_shr(((-b).min(31)) as u32)
+    };
     Ok(vec![num(from_fixed(r))])
 }
 fn api_shr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let x = to_fixed(arg_num(&a, 0).unwrap_or(0.0));
     let b = arg_int(&a, 1).unwrap_or(0);
-    let r = if b >= 0 { x.wrapping_shr((b.min(31)) as u32) } else { x.wrapping_shl(((-b).min(31)) as u32) };
+    let r = if b >= 0 {
+        x.wrapping_shr((b.min(31)) as u32)
+    } else {
+        x.wrapping_shl(((-b).min(31)) as u32)
+    };
     Ok(vec![num(from_fixed(r))])
 }
 fn api_lshr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -554,10 +654,16 @@ fn api_rotr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 // === String ===
 
 fn api_tostr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let v = a.get(0).cloned().unwrap_or(Value::Nil);
+    let v = a.first().cloned().unwrap_or(Value::Nil);
     let s = match &v {
         Value::Nil => "[nil]".to_string(),
-        Value::Bool(b) => if *b { "true".into() } else { "false".into() },
+        Value::Bool(b) => {
+            if *b {
+                "true".into()
+            } else {
+                "false".into()
+            }
+        }
         Value::Number(n) => number_to_str(*n),
         Value::Str(b) => return Ok(vec![Value::Str(Rc::clone(b))]),
         Value::Table(_) => "[table]".to_string(),
@@ -567,8 +673,11 @@ fn api_tostr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 
 fn api_tonum(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let v = a.get(0).cloned().unwrap_or(Value::Nil);
-    Ok(vec![match v.as_number() { Some(n) => num(n), None => nil() }])
+    let v = a.first().cloned().unwrap_or(Value::Nil);
+    Ok(vec![match v.as_number() {
+        Some(n) => num(n),
+        None => nil(),
+    }])
 }
 
 fn api_sub(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -576,8 +685,16 @@ fn api_sub(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let len = s.len() as i64;
     let start_raw = opt_int(&a, 1, 1) as i64;
     let end_raw = opt_int(&a, 2, len as i32) as i64;
-    let start = if start_raw < 0 { (len + start_raw + 1).max(1) } else { start_raw.max(1) };
-    let end = if end_raw < 0 { len + end_raw + 1 } else { end_raw.min(len) };
+    let start = if start_raw < 0 {
+        (len + start_raw + 1).max(1)
+    } else {
+        start_raw.max(1)
+    };
+    let end = if end_raw < 0 {
+        len + end_raw + 1
+    } else {
+        end_raw.min(len)
+    };
     if start > end || start > len {
         return Ok(vec![str_v(b"")]);
     }
@@ -591,7 +708,9 @@ fn api_chr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     for v in &a {
         if let Some(n) = v.as_number() {
             let n = n as i32;
-            if n >= 0 && n <= 255 { out.push(n as u8); }
+            if (0..=255).contains(&n) {
+                out.push(n as u8);
+            }
         }
     }
     Ok(vec![Value::Str(Rc::from(out.as_slice()))])
@@ -615,18 +734,31 @@ fn api_ord(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 
 fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let s = arg_str(&a, 0).unwrap_or_else(|| Rc::from(&[][..]));
-    let convert = if a.len() <= 2 || matches!(a.get(2), Some(Value::Nil)) { true } else { a[2].truthy() };
+    let convert = if a.len() <= 2 || matches!(a.get(2), Some(Value::Nil)) {
+        true
+    } else {
+        a[2].truthy()
+    };
     let t = Rc::new(RefCell::new(TableInner::new()));
 
     if let Some(Value::Number(n)) = a.get(1) {
-        let n = if n.is_nan() || *n < 1.0 { 1usize } else if *n > 255.0 { 255 } else { *n as usize };
+        let n = if n.is_nan() || *n < 1.0 {
+            1usize
+        } else if *n > 255.0 {
+            255
+        } else {
+            *n as usize
+        };
         let mut idx: i64 = 1;
         let mut pos = 0usize;
         while pos < s.len() {
             let end = (pos + n).min(s.len());
             let part = &s[pos..end];
             let v = if convert {
-                match std::str::from_utf8(part).ok().and_then(|x| x.parse::<f64>().ok()) {
+                match std::str::from_utf8(part)
+                    .ok()
+                    .and_then(|x| x.parse::<f64>().ok())
+                {
                     Some(f) => num(f),
                     None => Value::Str(Rc::from(part)),
                 }
@@ -634,7 +766,8 @@ fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
                 Value::Str(Rc::from(part))
             };
             t.borrow_mut().set(num(idx as f64), v);
-            idx += 1; pos = end;
+            idx += 1;
+            pos = end;
         }
         return Ok(vec![Value::Table(t)]);
     }
@@ -644,10 +777,9 @@ fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         None => Rc::from(b",".as_slice()),
     };
     if sep.is_empty() {
-        let mut idx: i64 = 1;
-        for &c in s.iter() {
-            t.borrow_mut().set(num(idx as f64), Value::Str(Rc::from(&[c][..])));
-            idx += 1;
+        for (idx, &c) in (1_i64..).zip(s.iter()) {
+            t.borrow_mut()
+                .set(num(idx as f64), Value::Str(Rc::from(&[c][..])));
         }
         return Ok(vec![Value::Table(t)]);
     }
@@ -655,10 +787,13 @@ fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let mut start = 0usize;
     let mut i = 0usize;
     while i + sep.len() <= s.len() {
-        if &s[i..i + sep.len()] == &sep[..] {
+        if s[i..i + sep.len()] == sep[..] {
             let part = &s[start..i];
             let v = if convert {
-                match std::str::from_utf8(part).ok().and_then(|x| x.parse::<f64>().ok()) {
+                match std::str::from_utf8(part)
+                    .ok()
+                    .and_then(|x| x.parse::<f64>().ok())
+                {
                     Some(f) => num(f),
                     None => Value::Str(Rc::from(part)),
                 }
@@ -675,7 +810,10 @@ fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     }
     let part = &s[start..];
     let v = if convert {
-        match std::str::from_utf8(part).ok().and_then(|x| x.parse::<f64>().ok()) {
+        match std::str::from_utf8(part)
+            .ok()
+            .and_then(|x| x.parse::<f64>().ok())
+        {
             Some(f) => num(f),
             None => Value::Str(Rc::from(part)),
         }
@@ -704,7 +842,9 @@ fn str_rep(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let s = arg_str(&a, 0).unwrap_or_else(|| Rc::from(&[][..]));
     let n = opt_int(&a, 1, 0).max(0) as usize;
     let mut r = Vec::with_capacity(s.len() * n);
-    for _ in 0..n { r.extend_from_slice(&s); }
+    for _ in 0..n {
+        r.extend_from_slice(&s);
+    }
     Ok(vec![Value::Str(Rc::from(r.as_slice()))])
 }
 fn str_format(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -725,7 +865,10 @@ fn str_format(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
                     argi += 1;
                 }
                 b's' => {
-                    let s = a.get(argi).and_then(|v| v.as_str()).unwrap_or_else(|| Rc::from(&[][..]));
+                    let s = a
+                        .get(argi)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_else(|| Rc::from(&[][..]));
                     out.extend_from_slice(&s);
                     argi += 1;
                 }
@@ -753,13 +896,15 @@ fn str_format(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 // === Table ===
 
 fn api_add(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    if let Some(Value::Table(t)) = args.get(0) {
+    if let Some(Value::Table(t)) = args.first() {
         let v = args.get(1).cloned().unwrap_or(Value::Nil);
         let pos = args.get(2).and_then(|x| x.as_number()).map(|n| n as i64);
         let mut tb = t.borrow_mut();
         let len = tb.raw_len();
         if let Some(p) = pos {
-            if p < 1 { return Ok(vec![v]); }
+            if p < 1 {
+                return Ok(vec![v]);
+            }
             for k in (p..=len).rev() {
                 let v_ = tb.map.get(&Key::Int(k)).cloned().unwrap_or(Value::Nil);
                 tb.map.insert(Key::Int(k + 1), v_);
@@ -774,20 +919,26 @@ fn api_add(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 
 fn api_del(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    if let (Some(Value::Table(t)), Some(target)) = (args.get(0), args.get(1)) {
+    if let (Some(Value::Table(t)), Some(target)) = (args.first(), args.get(1)) {
         let mut tb = t.borrow_mut();
         let len = tb.raw_len();
         let mut found_idx: Option<i64> = None;
         for i in 1..=len {
             let v = tb.map.get(&Key::Int(i)).cloned().unwrap_or(Value::Nil);
-            if v.raw_equal(target) { found_idx = Some(i); break; }
+            if v.raw_equal(target) {
+                found_idx = Some(i);
+                break;
+            }
         }
         if let Some(i) = found_idx {
             let removed = tb.map.get(&Key::Int(i)).cloned().unwrap_or(Value::Nil);
             for k in i..len {
                 let v_ = tb.map.get(&Key::Int(k + 1)).cloned().unwrap_or(Value::Nil);
-                if matches!(v_, Value::Nil) { tb.map.remove(&Key::Int(k)); }
-                else { tb.map.insert(Key::Int(k), v_); }
+                if matches!(v_, Value::Nil) {
+                    tb.map.remove(&Key::Int(k));
+                } else {
+                    tb.map.insert(Key::Int(k), v_);
+                }
             }
             tb.map.remove(&Key::Int(len));
             return Ok(vec![removed]);
@@ -797,19 +948,24 @@ fn api_del(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 
 fn api_deli(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    if let Some(Value::Table(t)) = args.get(0) {
+    if let Some(Value::Table(t)) = args.first() {
         let mut tb = t.borrow_mut();
         let len = tb.raw_len();
         let idx = match args.get(1) {
             Some(v) if !matches!(v, Value::Nil) => v.as_number().unwrap_or(0.0) as i64,
             _ => len,
         };
-        if idx < 1 || idx > len { return Ok(vec![Value::Nil]); }
+        if idx < 1 || idx > len {
+            return Ok(vec![Value::Nil]);
+        }
         let removed = tb.map.get(&Key::Int(idx)).cloned().unwrap_or(Value::Nil);
         for k in idx..len {
             let v_ = tb.map.get(&Key::Int(k + 1)).cloned().unwrap_or(Value::Nil);
-            if matches!(v_, Value::Nil) { tb.map.remove(&Key::Int(k)); }
-            else { tb.map.insert(Key::Int(k), v_); }
+            if matches!(v_, Value::Nil) {
+                tb.map.remove(&Key::Int(k));
+            } else {
+                tb.map.insert(Key::Int(k), v_);
+            }
         }
         tb.map.remove(&Key::Int(len));
         return Ok(vec![removed]);
@@ -818,7 +974,10 @@ fn api_deli(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 
 fn api_count(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let t = match args.get(0) { Some(Value::Table(t)) => t.clone(), _ => return Ok(vec![num(0.0)]) };
+    let t = match args.first() {
+        Some(Value::Table(t)) => t.clone(),
+        _ => return Ok(vec![num(0.0)]),
+    };
     if let Some(target) = args.get(1) {
         if !matches!(target, Value::Nil) {
             let tb = t.borrow();
@@ -826,7 +985,9 @@ fn api_count(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
             let mut c = 0;
             for i in 1..=len {
                 if let Some(v) = tb.map.get(&Key::Int(i)) {
-                    if v.raw_equal(target) { c += 1; }
+                    if v.raw_equal(target) {
+                        c += 1;
+                    }
                 }
             }
             return Ok(vec![num(c as f64)]);
@@ -837,22 +998,29 @@ fn api_count(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 
 fn api_foreach(i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let t = match args.get(0) { Some(Value::Table(t)) => t.clone(), _ => return Ok(vec![]) };
+    let t = match args.first() {
+        Some(Value::Table(t)) => t.clone(),
+        _ => return Ok(vec![]),
+    };
     let f = args.get(1).cloned().unwrap_or(Value::Nil);
     let mut idx: i64 = 1;
     loop {
         let len = t.borrow().raw_len();
-        if idx > len { break; }
+        if idx > len {
+            break;
+        }
         let v = t.borrow().get(&num(idx as f64));
         let _ = i.call_value(&f, vec![v])?;
         let new_len = t.borrow().raw_len();
-        if new_len >= len { idx += 1; }
+        if new_len >= len {
+            idx += 1;
+        }
     }
     Ok(vec![])
 }
 
 fn api_all(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let t = match args.get(0) {
+    let t = match args.first() {
         Some(Value::Table(t)) => t.clone(),
         _ => {
             // Return iterator that immediately returns nil
@@ -875,7 +1043,9 @@ fn api_all(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
             let len = tref.borrow().raw_len();
             // Only advance if no deletions occurred during the callback
             let next_idx = if len >= st.2 { st.1 + 1 } else { st.1 };
-            if next_idx > len { return Ok(vec![nil()]); }
+            if next_idx > len {
+                return Ok(vec![nil()]);
+            }
             st.1 = next_idx;
             st.2 = len;
             let v = tref.borrow().get(&num(next_idx as f64));
@@ -895,13 +1065,20 @@ fn api_pack(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 
 fn api_unpack(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let t = match args.get(0) { Some(Value::Table(t)) => t.clone(), _ => return Ok(vec![]) };
+    let t = match args.first() {
+        Some(Value::Table(t)) => t.clone(),
+        _ => return Ok(vec![]),
+    };
     let start = opt_int(&args, 1, 1) as i64;
     let end = if args.len() > 2 && !matches!(args[2], Value::Nil) {
         args[2].as_number().unwrap_or(0.0) as i64
     } else {
         let n = t.borrow().get(&str_v(b"n"));
-        if let Some(nv) = n.as_number() { nv as i64 } else { t.borrow().raw_len() }
+        if let Some(nv) = n.as_number() {
+            nv as i64
+        } else {
+            t.borrow().raw_len()
+        }
     };
     let mut out = Vec::new();
     for i in start..=end {
@@ -913,7 +1090,11 @@ fn api_unpack(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> 
 // === Graphics ===
 
 fn api_cls(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let col = if a.is_empty() || matches!(a[0], Value::Nil) { 0 } else { (arg_int(&a, 0).unwrap_or(0) & 0xF) as u8 };
+    let col = if a.is_empty() || matches!(a[0], Value::Nil) {
+        0
+    } else {
+        (arg_int(&a, 0).unwrap_or(0) & 0xF) as u8
+    };
     gfx::cls(i.host(), col);
     Ok(vec![])
 }
@@ -927,13 +1108,18 @@ fn api_pset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_pget(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let x = arg_int(&a, 0).unwrap_or(0);
     let y = arg_int(&a, 1).unwrap_or(0);
-    if x < 0 || x >= 128 || y < 0 || y >= 128 { return Ok(vec![num(0.0)]); }
+    if !(0..128).contains(&x) || !(0..128).contains(&y) {
+        return Ok(vec![num(0.0)]);
+    }
     let c = i.host().memory.screen_get(x as u8, y as u8);
     Ok(vec![num(c as f64)])
 }
 fn api_line(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let st = i.host();
-    if a.is_empty() { st.line_valid = false; return Ok(vec![]); }
+    if a.is_empty() {
+        st.line_valid = false;
+        return Ok(vec![]);
+    }
     if a.len() <= 3 || matches!(a.get(3), Some(Value::Nil)) {
         let x1 = arg_int(&a, 0).unwrap_or(0);
         let y1 = arg_int(&a, 1).unwrap_or(0);
@@ -941,7 +1127,9 @@ fn api_line(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         if st.line_valid {
             gfx::draw_line(&mut st.memory, st.line_x, st.line_y, x1, y1, col);
         }
-        st.line_x = x1; st.line_y = y1; st.line_valid = true;
+        st.line_x = x1;
+        st.line_y = y1;
+        st.line_valid = true;
         return Ok(vec![]);
     }
     let x0 = arg_int(&a, 0).unwrap_or(0);
@@ -950,47 +1138,79 @@ fn api_line(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let y1 = arg_int(&a, 3).unwrap_or(0);
     let col = get_color(st, &a, 4);
     gfx::draw_line(&mut st.memory, x0, y0, x1, y1, col);
-    st.line_x = x1; st.line_y = y1; st.line_valid = true;
+    st.line_x = x1;
+    st.line_y = y1;
+    st.line_valid = true;
     Ok(vec![])
 }
 fn api_rect(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let col = get_color(i.host(), &a, 4);
-    gfx::rect(&mut i.host().memory,
-              arg_int(&a, 0).unwrap_or(0), arg_int(&a, 1).unwrap_or(0),
-              arg_int(&a, 2).unwrap_or(0), arg_int(&a, 3).unwrap_or(0), col);
+    gfx::rect(
+        &mut i.host().memory,
+        arg_int(&a, 0).unwrap_or(0),
+        arg_int(&a, 1).unwrap_or(0),
+        arg_int(&a, 2).unwrap_or(0),
+        arg_int(&a, 3).unwrap_or(0),
+        col,
+    );
     Ok(vec![])
 }
 fn api_rectfill(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let col = get_color(i.host(), &a, 4);
-    gfx::rectfill(&mut i.host().memory,
-                  arg_int(&a, 0).unwrap_or(0), arg_int(&a, 1).unwrap_or(0),
-                  arg_int(&a, 2).unwrap_or(0), arg_int(&a, 3).unwrap_or(0), col);
+    gfx::rectfill(
+        &mut i.host().memory,
+        arg_int(&a, 0).unwrap_or(0),
+        arg_int(&a, 1).unwrap_or(0),
+        arg_int(&a, 2).unwrap_or(0),
+        arg_int(&a, 3).unwrap_or(0),
+        col,
+    );
     Ok(vec![])
 }
 fn api_circ(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let col = get_color(i.host(), &a, 3);
-    gfx::circ(&mut i.host().memory,
-              arg_int(&a, 0).unwrap_or(0), arg_int(&a, 1).unwrap_or(0), opt_int(&a, 2, 4), col);
+    gfx::circ(
+        &mut i.host().memory,
+        arg_int(&a, 0).unwrap_or(0),
+        arg_int(&a, 1).unwrap_or(0),
+        opt_int(&a, 2, 4),
+        col,
+    );
     Ok(vec![])
 }
 fn api_circfill(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let col = get_color(i.host(), &a, 3);
-    gfx::circfill(&mut i.host().memory,
-                  arg_int(&a, 0).unwrap_or(0), arg_int(&a, 1).unwrap_or(0), opt_int(&a, 2, 4), col);
+    gfx::circfill(
+        &mut i.host().memory,
+        arg_int(&a, 0).unwrap_or(0),
+        arg_int(&a, 1).unwrap_or(0),
+        opt_int(&a, 2, 4),
+        col,
+    );
     Ok(vec![])
 }
 fn api_oval(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let col = get_color(i.host(), &a, 4);
-    gfx::oval(&mut i.host().memory,
-              arg_int(&a, 0).unwrap_or(0), arg_int(&a, 1).unwrap_or(0),
-              arg_int(&a, 2).unwrap_or(0), arg_int(&a, 3).unwrap_or(0), col);
+    gfx::oval(
+        &mut i.host().memory,
+        arg_int(&a, 0).unwrap_or(0),
+        arg_int(&a, 1).unwrap_or(0),
+        arg_int(&a, 2).unwrap_or(0),
+        arg_int(&a, 3).unwrap_or(0),
+        col,
+    );
     Ok(vec![])
 }
 fn api_ovalfill(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let col = get_color(i.host(), &a, 4);
-    gfx::ovalfill(&mut i.host().memory,
-                  arg_int(&a, 0).unwrap_or(0), arg_int(&a, 1).unwrap_or(0),
-                  arg_int(&a, 2).unwrap_or(0), arg_int(&a, 3).unwrap_or(0), col);
+    gfx::ovalfill(
+        &mut i.host().memory,
+        arg_int(&a, 0).unwrap_or(0),
+        arg_int(&a, 1).unwrap_or(0),
+        arg_int(&a, 2).unwrap_or(0),
+        arg_int(&a, 3).unwrap_or(0),
+        col,
+    );
     Ok(vec![])
 }
 fn api_spr(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -1044,21 +1264,27 @@ fn api_mset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_sget(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let x = arg_int(&a, 0).unwrap_or(0);
     let y = arg_int(&a, 1).unwrap_or(0);
-    if x < 0 || x >= 128 || y < 0 || y >= 128 { return Ok(vec![num(0.0)]); }
-    Ok(vec![num(i.host().memory.sprite_get(x as u8, y as u8) as f64)])
+    if !(0..128).contains(&x) || !(0..128).contains(&y) {
+        return Ok(vec![num(0.0)]);
+    }
+    Ok(vec![num(
+        i.host().memory.sprite_get(x as u8, y as u8) as f64
+    )])
 }
 fn api_sset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let x = arg_int(&a, 0).unwrap_or(0);
     let y = arg_int(&a, 1).unwrap_or(0);
     let col = get_color(i.host(), &a, 2);
-    if x >= 0 && x < 128 && y >= 0 && y < 128 {
+    if (0..128).contains(&x) && (0..128).contains(&y) {
         i.host().memory.sprite_set(x as u8, y as u8, col);
     }
     Ok(vec![])
 }
 fn api_fget(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let n = arg_int(&a, 0).unwrap_or(0);
-    if n < 0 || n >= 256 { return Ok(vec![num(0.0)]); }
+    if !(0..256).contains(&n) {
+        return Ok(vec![num(0.0)]);
+    }
     let flags = i.host().memory.ram[mem::ADDR_FLAGS as usize + n as usize];
     if a.len() <= 1 || matches!(a[1], Value::Nil) {
         return Ok(vec![num(flags as f64)]);
@@ -1068,7 +1294,9 @@ fn api_fget(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 fn api_fset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let n = arg_int(&a, 0).unwrap_or(0);
-    if n < 0 || n >= 256 { return Ok(vec![]); }
+    if !(0..256).contains(&n) {
+        return Ok(vec![]);
+    }
     let addr = mem::ADDR_FLAGS as usize + n as usize;
     if a.len() <= 2 || matches!(a.get(2), Some(Value::Nil)) {
         i.host().memory.ram[addr] = (arg_int(&a, 1).unwrap_or(0) & 0xFF) as u8;
@@ -1083,7 +1311,10 @@ fn api_fset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![])
 }
 fn api_print(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let txt = a.get(0).cloned().map(|v| v.as_str()).flatten()
+    let txt = a
+        .first()
+        .cloned()
+        .and_then(|v| v.as_str())
         .unwrap_or_else(|| Rc::from(b"".as_slice()));
     let st = i.host();
     let r = if a.len() <= 1 || matches!(a.get(1), Some(Value::Nil)) {
@@ -1164,7 +1395,12 @@ fn api_clip(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         st.memory.ram[mem::ADDR_CLIP_RIGHT as usize] = x1 as u8;
         st.memory.ram[mem::ADDR_CLIP_BOTTOM as usize] = y1 as u8;
     }
-    Ok(vec![num(prev_x as f64), num(prev_y as f64), num(prev_w as f64), num(prev_h as f64)])
+    Ok(vec![
+        num(prev_x as f64),
+        num(prev_y as f64),
+        num(prev_w as f64),
+        num(prev_h as f64),
+    ])
 }
 fn api_pal(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let st = i.host();
@@ -1178,7 +1414,7 @@ fn api_pal(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         st.memory.ram[mem::ADDR_FILL_PAT as usize + 2] = 0;
         return Ok(vec![]);
     }
-    if let Some(Value::Table(t)) = a.get(0) {
+    if let Some(Value::Table(t)) = a.first() {
         let p = opt_int(&a, 1, 0);
         for k in 0..16 {
             let v = t.borrow().get(&num(k as f64));
@@ -1237,7 +1473,8 @@ fn api_fillp(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let st = i.host();
     let p = opt_num(&a, 0, 0.0);
     let int_val = safe_to_i32(p) as u32;
-    st.memory.poke16(mem::ADDR_FILL_PAT, (int_val & 0xFFFF) as u16);
+    st.memory
+        .poke16(mem::ADDR_FILL_PAT, (int_val & 0xFFFF) as u16);
     let trans = if int_val & 0x10000 != 0 { 1 } else { 0 };
     st.memory.ram[mem::ADDR_FILL_PAT as usize + 2] = trans;
     Ok(vec![])
@@ -1268,8 +1505,12 @@ fn api_btnp(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         let mut p0: u32 = 0;
         let mut p1: u32 = 0;
         for b in 0..6u8 {
-            if st.input.btnp(b, 0, &st.memory) { p0 |= 1 << b; }
-            if st.input.btnp(b, 1, &st.memory) { p1 |= 1 << b; }
+            if st.input.btnp(b, 0, &st.memory) {
+                p0 |= 1 << b;
+            }
+            if st.input.btnp(b, 1, &st.memory) {
+                p1 |= 1 << b;
+            }
         }
         return Ok(vec![num((p0 | (p1 << 8)) as f64)]);
     }
@@ -1324,37 +1565,71 @@ fn api_poke4(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let addr = arg_int(&a, 0).unwrap_or(0) as u16;
     let v = arg_num(&a, 1).unwrap_or(0.0);
     let scaled = v * 65536.0;
-    let fixed = if scaled >= i32::MAX as f64 { i32::MAX }
-                else if scaled <= i32::MIN as f64 { i32::MIN }
-                else { scaled as i32 };
+    let fixed = if scaled >= i32::MAX as f64 {
+        i32::MAX
+    } else if scaled <= i32::MIN as f64 {
+        i32::MIN
+    } else {
+        scaled as i32
+    };
     i.host().memory.poke32(addr, fixed as u32);
     Ok(vec![])
 }
 fn api_memcpy(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    i.host().memory.memcpy(arg_int(&a, 0).unwrap_or(0) as u16,
-                            arg_int(&a, 1).unwrap_or(0) as u16,
-                            arg_int(&a, 2).unwrap_or(0) as u16);
+    i.host().memory.memcpy(
+        arg_int(&a, 0).unwrap_or(0) as u16,
+        arg_int(&a, 1).unwrap_or(0) as u16,
+        arg_int(&a, 2).unwrap_or(0) as u16,
+    );
     Ok(vec![])
 }
 fn api_memset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    i.host().memory.memset(arg_int(&a, 0).unwrap_or(0) as u16,
-                            (arg_int(&a, 1).unwrap_or(0) & 0xFF) as u8,
-                            arg_int(&a, 2).unwrap_or(0) as u16);
+    i.host().memory.memset(
+        arg_int(&a, 0).unwrap_or(0) as u16,
+        (arg_int(&a, 1).unwrap_or(0) & 0xFF) as u8,
+        arg_int(&a, 2).unwrap_or(0) as u16,
+    );
     Ok(vec![])
 }
 fn api_reload(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let dst = if a.is_empty() || matches!(a[0], Value::Nil) { 0 } else { arg_int(&a, 0).unwrap_or(0) as u16 };
-    let src = if a.len() < 2 || matches!(a[1], Value::Nil) { 0 } else { arg_int(&a, 1).unwrap_or(0) as u16 };
-    let len = if a.len() < 3 || matches!(a[2], Value::Nil) { 0x4300 } else { arg_int(&a, 2).unwrap_or(0) as u16 };
+    let dst = if a.is_empty() || matches!(a[0], Value::Nil) {
+        0
+    } else {
+        arg_int(&a, 0).unwrap_or(0) as u16
+    };
+    let src = if a.len() < 2 || matches!(a[1], Value::Nil) {
+        0
+    } else {
+        arg_int(&a, 1).unwrap_or(0) as u16
+    };
+    let len = if a.len() < 3 || matches!(a[2], Value::Nil) {
+        0x4300
+    } else {
+        arg_int(&a, 2).unwrap_or(0) as u16
+    };
     i.host().memory.reload(dst, src, len);
     Ok(vec![])
 }
 fn api_cstore(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let dst = if a.is_empty() || matches!(a[0], Value::Nil) { 0 } else { arg_int(&a, 0).unwrap_or(0) as u16 };
-    let src = if a.len() < 2 || matches!(a[1], Value::Nil) { 0 } else { arg_int(&a, 1).unwrap_or(0) as u16 };
-    let len = if a.len() < 3 || matches!(a[2], Value::Nil) { 0x4300 } else { arg_int(&a, 2).unwrap_or(0) as u16 };
+    let dst = if a.is_empty() || matches!(a[0], Value::Nil) {
+        0
+    } else {
+        arg_int(&a, 0).unwrap_or(0) as u16
+    };
+    let src = if a.len() < 2 || matches!(a[1], Value::Nil) {
+        0
+    } else {
+        arg_int(&a, 1).unwrap_or(0) as u16
+    };
+    let len = if a.len() < 3 || matches!(a[2], Value::Nil) {
+        0x4300
+    } else {
+        arg_int(&a, 2).unwrap_or(0) as u16
+    };
     let st = i.host();
-    for k in 0..len { st.memory.rom[dst.wrapping_add(k) as usize] = st.memory.ram[src.wrapping_add(k) as usize]; }
+    for k in 0..len {
+        st.memory.rom[dst.wrapping_add(k) as usize] = st.memory.ram[src.wrapping_add(k) as usize];
+    }
     Ok(vec![])
 }
 
@@ -1393,27 +1668,59 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         7 => num(st.target_fps as f64),
         16..=19 => {
             let c = &st.audio.channels[(n - 16) as usize];
-            if !c.finished && c.sfx_id >= 0 { num(c.note_index as f64) } else { num(0.0) }
+            if !c.finished && c.sfx_id >= 0 {
+                num(c.note_index as f64)
+            } else {
+                num(0.0)
+            }
         }
         20..=23 => {
             let c = &st.audio.channels[(n - 20) as usize];
-            if !c.finished && c.sfx_id >= 0 { num(c.sfx_id as f64) } else { num(-1.0) }
+            if !c.finished && c.sfx_id >= 0 {
+                num(c.sfx_id as f64)
+            } else {
+                num(-1.0)
+            }
         }
         24 => num(st.audio.music_state.pattern as f64),
         26 => num(st.audio.music_state.tick as f64),
         30 => boolv(st.input.key_chars_len > 0),
         31 => str_v(b""),
-        32 => num(if st.memory.ram[0x5F2D] & 1 != 0 { st.input.mouse_x as f64 } else { 0.0 }),
-        33 => num(if st.memory.ram[0x5F2D] & 1 != 0 { st.input.mouse_y as f64 } else { 0.0 }),
-        34 => num(if st.memory.ram[0x5F2D] & 1 != 0 { st.input.mouse_buttons as f64 } else { 0.0 }),
-        36 => num(if st.memory.ram[0x5F2D] & 1 != 0 { st.input.mouse_wheel as f64 } else { 0.0 }),
+        32 => num(if st.memory.ram[0x5F2D] & 1 != 0 {
+            st.input.mouse_x as f64
+        } else {
+            0.0
+        }),
+        33 => num(if st.memory.ram[0x5F2D] & 1 != 0 {
+            st.input.mouse_y as f64
+        } else {
+            0.0
+        }),
+        34 => num(if st.memory.ram[0x5F2D] & 1 != 0 {
+            st.input.mouse_buttons as f64
+        } else {
+            0.0
+        }),
+        36 => num(if st.memory.ram[0x5F2D] & 1 != 0 {
+            st.input.mouse_wheel as f64
+        } else {
+            0.0
+        }),
         46..=49 => {
             let c = &st.audio.channels[(n - 46) as usize];
-            if !c.finished && c.sfx_id >= 0 { num(c.note_index as f64) } else { num(0.0) }
+            if !c.finished && c.sfx_id >= 0 {
+                num(c.note_index as f64)
+            } else {
+                num(0.0)
+            }
         }
         50..=53 => {
             let c = &st.audio.channels[(n - 50) as usize];
-            if !c.finished && c.sfx_id >= 0 { num(c.sfx_id as f64) } else { num(-1.0) }
+            if !c.finished && c.sfx_id >= 0 {
+                num(c.sfx_id as f64)
+            } else {
+                num(-1.0)
+            }
         }
         54 => num(st.audio.music_state.pattern as f64),
         55 => num(st.audio.music_state.total_patterns as f64),
@@ -1434,7 +1741,9 @@ fn api_cartdata(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> 
 }
 fn api_dget(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let idx = arg_int(&a, 0).unwrap_or(0);
-    if idx < 0 || idx >= 64 { return Ok(vec![num(0.0)]); }
+    if !(0..64).contains(&idx) {
+        return Ok(vec![num(0.0)]);
+    }
     let addr = mem::ADDR_CART_DATA + (idx as u16) * 4;
     let raw = i.host().memory.peek32(addr);
     let fixed = raw as i32;
@@ -1443,20 +1752,34 @@ fn api_dget(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_dset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let idx = arg_int(&a, 0).unwrap_or(0);
     let v = arg_num(&a, 1).unwrap_or(0.0);
-    if idx < 0 || idx >= 64 { return Ok(vec![]); }
+    if !(0..64).contains(&idx) {
+        return Ok(vec![]);
+    }
     let addr = mem::ADDR_CART_DATA + (idx as u16) * 4;
     let scaled = v * 65536.0;
-    let fixed = if scaled >= i32::MAX as f64 { i32::MAX }
-                else if scaled <= i32::MIN as f64 { i32::MIN }
-                else { scaled as i32 };
+    let fixed = if scaled >= i32::MAX as f64 {
+        i32::MAX
+    } else if scaled <= i32::MIN as f64 {
+        i32::MIN
+    } else {
+        scaled as i32
+    };
     i.host().memory.poke32(addr, fixed as u32);
     Ok(vec![])
 }
-fn api_menuitem(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> { Ok(vec![]) }
-fn api_extcmd(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> { Ok(vec![]) }
-fn api_flip(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> { Ok(vec![]) }
+fn api_menuitem(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    Ok(vec![])
+}
+fn api_extcmd(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    Ok(vec![])
+}
+fn api_flip(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    Ok(vec![])
+}
 fn api_reset(i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     i.host().memory.init_draw_state();
     Ok(vec![])
 }
-fn api_stop(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> { Ok(vec![]) }
+fn api_stop(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    Ok(vec![])
+}

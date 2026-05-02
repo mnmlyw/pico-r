@@ -24,12 +24,11 @@ A complete PICO-8 runtime implemented in safe Rust as a single ~360 KB WebAssemb
 
 ## Build
 
-Requires `rustup` and the wasm32 target.
+Requires `rustup`. The checked-in `rust-toolchain.toml` pins stable Rust, `rustfmt`, `clippy`, and the wasm32 target.
 
 ```bash
 # One-time toolchain setup (Homebrew Rust does NOT include the wasm32 target):
 brew install rustup-init && rustup-init -y
-rustup target add wasm32-unknown-unknown
 
 # Build the WASM module and copy it into web/:
 ./build.sh
@@ -113,7 +112,7 @@ UPDATE ERROR (frame 81): cart:2032 in _update: compare nil with number
 
 This is how the `repeat..until`-scope and broken-`all()`-iterator bugs were diagnosed during development.
 
-A sibling `cargo run --bin dump-pp --release` writes the preprocessed Lua source to `/tmp/celeste2_preprocessed.lua` so you can `sed -n '2030,2040p'` and see the actual code at the failing line.
+A sibling `cargo run --bin dump-pp --release -- /path/to/cart.p8.png [output.lua]` writes the preprocessed Lua source so you can `sed -n '2030,2040p' output.lua` and see the actual code at the failing line.
 
 ## Compatibility
 

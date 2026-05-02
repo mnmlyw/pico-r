@@ -36,6 +36,12 @@ pub struct TableInner {
     pub metatable: Option<Rc<Table>>,
 }
 
+impl Default for TableInner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TableInner {
     pub fn new() -> Self {
         Self {
@@ -45,13 +51,23 @@ impl TableInner {
         }
     }
     pub fn get(&self, k: &Value) -> Value {
-        if matches!(k, Value::Nil) { return Value::Nil; }
-        let key = match Key::from_value(k) { Some(k) => k, None => return Value::Nil };
+        if matches!(k, Value::Nil) {
+            return Value::Nil;
+        }
+        let key = match Key::from_value(k) {
+            Some(k) => k,
+            None => return Value::Nil,
+        };
         self.map.get(&key).cloned().unwrap_or(Value::Nil)
     }
     pub fn set(&mut self, k: Value, v: Value) {
-        if matches!(k, Value::Nil) { return; }
-        let key = match Key::from_value(&k) { Some(k) => k, None => return };
+        if matches!(k, Value::Nil) {
+            return;
+        }
+        let key = match Key::from_value(&k) {
+            Some(k) => k,
+            None => return,
+        };
         if let Key::Int(i) = key {
             if i > 0 && (i as u32) > self.array_max_hint {
                 self.array_max_hint = i as u32;
@@ -70,7 +86,9 @@ impl TableInner {
         let mut n: i64 = 0;
         loop {
             let k = Key::Int(n + 1);
-            if !self.map.contains_key(&k) { return n; }
+            if !self.map.contains_key(&k) {
+                return n;
+            }
             n += 1;
             if n > self.array_max_hint as i64 + 1 && n > 1024 {
                 // Defensive cap to avoid runaway scans
@@ -110,7 +128,9 @@ impl Value {
             Value::Str(s) => {
                 let s = std::str::from_utf8(s).ok()?.trim();
                 if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-                    i64::from_str_radix(rest, 16).ok().map(|n| n as f64)
+                    i64::from_str_radix(rest, 16)
+                        .ok()
+                        .map(|n| n as f64)
                         .or_else(|| u64::from_str_radix(rest, 16).ok().map(|n| n as f64))
                 } else {
                     s.parse::<f64>().ok()
@@ -133,7 +153,7 @@ impl Value {
         match (self, other) {
             (Value::Nil, Value::Nil) => true,
             (Value::Bool(a), Value::Bool(b)) => a == b,
-            (Value::Number(a), Value::Number(b)) => a == b || (a.is_nan() && false),
+            (Value::Number(a), Value::Number(b)) => a == b,
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::Table(a), Value::Table(b)) => Rc::ptr_eq(a, b),
             (Value::Function(a), Value::Function(b)) => a.identity_eq(b),
@@ -143,8 +163,12 @@ impl Value {
 }
 
 pub fn number_to_str(n: f64) -> String {
-    if n.is_nan() { return "nan".into(); }
-    if n.is_infinite() { return if n > 0.0 { "inf".into() } else { "-inf".into() }; }
+    if n.is_nan() {
+        return "nan".into();
+    }
+    if n.is_infinite() {
+        return if n > 0.0 { "inf".into() } else { "-inf".into() };
+    }
     if n == n.trunc() && n.abs() < 1e16 {
         format!("{}", n as i64)
     } else {
@@ -159,9 +183,9 @@ pub fn number_to_str(n: f64) -> String {
 pub enum Key {
     Bool(bool),
     Int(i64),
-    Float(u64),                  // f64 bits, normalized for NaN
+    Float(u64), // f64 bits, normalized for NaN
     Str(Rc<[u8]>),
-    Table(usize),                // Rc::as_ptr() as usize
+    Table(usize), // Rc::as_ptr() as usize
     Function(usize),
 }
 
@@ -186,22 +210,38 @@ impl Eq for Key {}
 impl std::hash::Hash for Key {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
-            Key::Bool(b) => { 0u8.hash(state); b.hash(state); }
+            Key::Bool(b) => {
+                0u8.hash(state);
+                b.hash(state);
+            }
             // Both Int and Float-with-integer-value should hash the same.
             // Convert to canonical form: if float is integral and fits in i64, treat as Int.
-            Key::Int(i) => { 1u8.hash(state); i.hash(state); }
+            Key::Int(i) => {
+                1u8.hash(state);
+                i.hash(state);
+            }
             Key::Float(bits) => {
                 let f = f64::from_bits(*bits);
                 if f.is_finite() && f == f.trunc() && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
                     1u8.hash(state);
                     (f as i64).hash(state);
                 } else {
-                    2u8.hash(state); bits.hash(state);
+                    2u8.hash(state);
+                    bits.hash(state);
                 }
             }
-            Key::Str(s) => { 3u8.hash(state); s.hash(state); }
-            Key::Table(p) => { 4u8.hash(state); p.hash(state); }
-            Key::Function(p) => { 5u8.hash(state); p.hash(state); }
+            Key::Str(s) => {
+                3u8.hash(state);
+                s.hash(state);
+            }
+            Key::Table(p) => {
+                4u8.hash(state);
+                p.hash(state);
+            }
+            Key::Function(p) => {
+                5u8.hash(state);
+                p.hash(state);
+            }
         }
     }
 }
@@ -212,7 +252,9 @@ impl Key {
             Value::Nil => None,
             Value::Bool(b) => Some(Key::Bool(*b)),
             Value::Number(n) => {
-                if n.is_nan() { return None; }
+                if n.is_nan() {
+                    return None;
+                }
                 if *n == n.trunc() && *n >= i64::MIN as f64 && *n <= i64::MAX as f64 {
                     Some(Key::Int(*n as i64))
                 } else {
@@ -237,8 +279,10 @@ pub struct NativeFn {
     pub name: &'static str,
     /// Native callbacks receive the interpreter (for invoking the engine,
     /// allocating tables, error-raising) and the args. They return values.
-    pub func: Box<dyn Fn(&mut Interp, Vec<Value>) -> Result<Vec<Value>, RtError>>,
+    pub func: Box<NativeCallback>,
 }
+
+pub type NativeCallback = dyn Fn(&mut Interp, Vec<Value>) -> Result<Vec<Value>, RtError>;
 
 pub struct LuaClosure {
     pub body: Rc<FuncBody>,
@@ -271,7 +315,10 @@ impl fmt::Debug for Function {
 /// (Rc-shared) are kept by reference — they're code, not state. Used by the
 /// in-memory save-state snapshot to capture mutable Lua state without going
 /// through serialization.
-pub fn deep_clone_value(v: &Value, seen: &mut std::collections::HashMap<usize, Rc<Table>>) -> Value {
+pub fn deep_clone_value(
+    v: &Value,
+    seen: &mut std::collections::HashMap<usize, Rc<Table>>,
+) -> Value {
     match v {
         Value::Table(t) => Value::Table(deep_clone_table(t, seen)),
         other => other.clone(),
@@ -294,7 +341,11 @@ pub fn deep_clone_table(
         dst.metatable = src.metatable.as_ref().map(|m| deep_clone_table(m, seen));
         dst.array_max_hint = src.array_max_hint;
         // Build the cloned map; collect first to release the src borrow before recursing
-        let pairs: Vec<(Key, Value)> = src.map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let pairs: Vec<(Key, Value)> = src
+            .map
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         drop(src);
         drop(dst);
         for (k, v) in pairs {

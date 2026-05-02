@@ -133,7 +133,7 @@ pub fn get_pixel(code: u8, x: u8, y: u8) -> bool {
     }
     let glyph = FONT_DATA[code as usize];
     let byte_idx = (y / 2) as usize;
-    let nibble = if y % 2 == 0 {
+    let nibble = if y.is_multiple_of(2) {
         glyph[byte_idx] >> 4
     } else {
         glyph[byte_idx] & 0x0F

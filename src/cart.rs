@@ -192,7 +192,7 @@ fn parse_sfx_line(memory: &mut Memory, line: &[u8], row: usize) {
         if off + 5 > line.len() {
             break;
         }
-        let d0 = hex_val(line[off + 0]);
+        let d0 = hex_val(line[off]);
         let d1 = hex_val(line[off + 1]);
         let d2 = hex_val(line[off + 2]);
         let d3 = hex_val(line[off + 3]);
@@ -204,8 +204,7 @@ fn parse_sfx_line(memory: &mut Memory, line: &[u8], row: usize) {
         let effect = d4 & 0x7;
 
         let byte0 = (pitch & 0x3F) | ((waveform & 0x3) << 6);
-        let byte1 =
-            ((waveform >> 2) & 0x1) | (volume << 1) | (effect << 4) | (custom << 7);
+        let byte1 = ((waveform >> 2) & 0x1) | (volume << 1) | (effect << 4) | (custom << 7);
 
         let note_addr = base + 4 + note_i * 2;
         memory.ram[note_addr] = byte0;
@@ -249,7 +248,7 @@ fn parse_p8_png(data: &[u8], memory: &mut Memory) -> Result<Cart, CartError> {
     let total_pixels: usize = 160 * 205;
     let mut cart_data = vec![0u8; total_pixels];
     for i in 0..total_pixels {
-        let r = pixels[i * 4 + 0];
+        let r = pixels[i * 4];
         let g = pixels[i * 4 + 1];
         let b = pixels[i * 4 + 2];
         let a = pixels[i * 4 + 3];
@@ -297,12 +296,8 @@ fn decode_png(data: &[u8]) -> Result<Vec<u8>, CartError> {
     let mut idat: Vec<u8> = Vec::new();
 
     while pos + 12 <= data.len() {
-        let chunk_len = u32::from_be_bytes([
-            data[pos],
-            data[pos + 1],
-            data[pos + 2],
-            data[pos + 3],
-        ]) as usize;
+        let chunk_len =
+            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
         let chunk_type = &data[pos + 4..pos + 8];
         let chunk_start = pos + 8;
         let chunk_end = chunk_start + chunk_len;
@@ -343,8 +338,7 @@ fn decode_png(data: &[u8]) -> Result<Vec<u8>, CartError> {
     }
 
     // Decompress zlib
-    let raw = miniz_oxide::inflate::decompress_to_vec_zlib(&idat)
-        .map_err(|_| CartError::Zlib)?;
+    let raw = miniz_oxide::inflate::decompress_to_vec_zlib(&idat).map_err(|_| CartError::Zlib)?;
 
     let bpp: usize = 4;
     let row_bytes = width as usize * bpp;
@@ -361,8 +355,16 @@ fn decode_png(data: &[u8]) -> Result<Vec<u8>, CartError> {
 
         for x in 0..row_bytes {
             let raw_byte = scanline[x];
-            let a_val: u8 = if x >= bpp { pixels[y * row_bytes + x - bpp] } else { 0 };
-            let b_val: u8 = if y > 0 { pixels[(y - 1) * row_bytes + x] } else { 0 };
+            let a_val: u8 = if x >= bpp {
+                pixels[y * row_bytes + x - bpp]
+            } else {
+                0
+            };
+            let b_val: u8 = if y > 0 {
+                pixels[(y - 1) * row_bytes + x]
+            } else {
+                0
+            };
             let c_val: u8 = if y > 0 && x >= bpp {
                 pixels[(y - 1) * row_bytes + x - bpp]
             } else {
@@ -372,8 +374,7 @@ fn decode_png(data: &[u8]) -> Result<Vec<u8>, CartError> {
                 0 => raw_byte,
                 1 => raw_byte.wrapping_add(a_val),
                 2 => raw_byte.wrapping_add(b_val),
-                3 => raw_byte
-                    .wrapping_add(((a_val as u16 + b_val as u16) / 2) as u8),
+                3 => raw_byte.wrapping_add(((a_val as u16 + b_val as u16) / 2) as u8),
                 4 => raw_byte.wrapping_add(paeth(a_val, b_val, c_val)),
                 _ => return Err(CartError::InvalidPng),
             };
@@ -463,7 +464,11 @@ struct BitReader<'a> {
 
 impl<'a> BitReader<'a> {
     fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0, bit_pos: 0 }
+        Self {
+            data,
+            pos: 0,
+            bit_pos: 0,
+        }
     }
     fn read_bit(&mut self) -> Result<u8, CartError> {
         if self.pos >= self.data.len() {
@@ -507,8 +512,8 @@ fn decompress_pxa(region: &[u8]) -> Result<Vec<u8>, CartError> {
     let compressed = &region[8..];
 
     let mut mtf: [u8; 256] = [0; 256];
-    for i in 0..256 {
-        mtf[i] = i as u8;
+    for (i, slot) in mtf.iter_mut().enumerate() {
+        *slot = i as u8;
     }
 
     let mut output = vec![0u8; decomp_len];
@@ -524,16 +529,11 @@ fn decompress_pxa(region: &[u8]) -> Result<Vec<u8>, CartError> {
 
         if block_type == 1 {
             let mut extra: u8 = 0;
-            loop {
-                match reader.read_bit() {
-                    Ok(b) => {
-                        if b == 0 {
-                            break;
-                        }
-                        extra += 1;
-                    }
-                    Err(_) => break,
+            while let Ok(b) = reader.read_bit() {
+                if b == 0 {
+                    break;
                 }
+                extra += 1;
             }
             let base = ((1usize << extra) - 1) << 4;
             let n_bits = 4 + extra;

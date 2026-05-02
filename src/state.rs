@@ -22,6 +22,12 @@ pub struct PicoState {
     pub line_valid: bool,
 }
 
+impl Default for PicoState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PicoState {
     pub fn new() -> Self {
         let mut memory = Memory::new();

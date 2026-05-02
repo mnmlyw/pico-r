@@ -10,13 +10,13 @@
 //    tostr/tonum hex flags). Pure-arithmetic carts won't notice, but
 //    overflow-trick carts will.
 
+pub mod api;
 pub mod ast;
+pub mod interp;
 pub mod lex;
 pub mod parse;
-pub mod value;
-pub mod interp;
-pub mod api;
 pub mod serialize;
+pub mod value;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -40,13 +40,22 @@ pub struct LuaImpl {
     error: Option<String>,
 }
 
+impl Default for LuaImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LuaImpl {
     pub fn new() -> Self {
         let globals = Rc::new(RefCell::new(TableInner::new()));
         api::register_all(&globals);
 
         // Install _G as a self-reference
-        globals.borrow_mut().set(Value::Str(Rc::from(b"_G".as_slice())), Value::Table(Rc::clone(&globals)));
+        globals.borrow_mut().set(
+            Value::Str(Rc::from(b"_G".as_slice())),
+            Value::Table(Rc::clone(&globals)),
+        );
 
         let interp = Interp::new(globals);
         Self {
@@ -70,9 +79,17 @@ impl LuaImpl {
     }
 
     fn call_global(&mut self, name: &[u8]) {
-        if self.error.is_some() { return; }
-        let f = self.interp.globals.borrow().get(&Value::Str(Rc::from(name)));
-        if matches!(f, Value::Nil) { return; }
+        if self.error.is_some() {
+            return;
+        }
+        let f = self
+            .interp
+            .globals
+            .borrow()
+            .get(&Value::Str(Rc::from(name)));
+        if matches!(f, Value::Nil) {
+            return;
+        }
         if let Err(e) = self.interp.call_value(&f, Vec::new()) {
             let msg = format!(
                 "{}:{} in {}: {}",
@@ -101,9 +118,13 @@ impl LuaEngine for LuaImpl {
         // Tokenize + parse
         let bytes = processed.as_bytes();
         let mut lex = lex::Lexer::new(bytes);
-        let toks = lex.tokenize().map_err(|e| format!("lex error line {}: {}", e.line, e.msg))?;
+        let toks = lex
+            .tokenize()
+            .map_err(|e| format!("lex error line {}: {}", e.line, e.msg))?;
         let mut p = parse::Parser::new(toks);
-        let chunk = p.parse_chunk().map_err(|e| format!("parse error line {}: {}", e.line, e.msg))?;
+        let chunk = p
+            .parse_chunk()
+            .map_err(|e| format!("parse error line {}: {}", e.line, e.msg))?;
 
         // Execute top-level (defines _init/_update/_draw and any module-scope code)
         self.interp.host = state as *mut PicoState;
@@ -162,13 +183,19 @@ impl LuaEngine for LuaImpl {
         self.interp.host = state as *mut PicoState;
         // Dynamic lookup per frame — carts can swap _update/_update60 at runtime.
         let has60 = matches!(
-            self.interp.globals.borrow().get(&Value::Str(Rc::from(b"_update60".as_slice()))),
+            self.interp
+                .globals
+                .borrow()
+                .get(&Value::Str(Rc::from(b"_update60".as_slice()))),
             Value::Function(_)
         );
         if has60 {
             self.call_global(b"_update60");
         } else if matches!(
-            self.interp.globals.borrow().get(&Value::Str(Rc::from(b"_update".as_slice()))),
+            self.interp
+                .globals
+                .borrow()
+                .get(&Value::Str(Rc::from(b"_update".as_slice()))),
             Value::Function(_)
         ) {
             self.call_global(b"_update");
@@ -178,16 +205,25 @@ impl LuaEngine for LuaImpl {
     fn call_draw(&mut self, state: &mut PicoState) {
         self.interp.host = state as *mut PicoState;
         if matches!(
-            self.interp.globals.borrow().get(&Value::Str(Rc::from(b"_draw".as_slice()))),
+            self.interp
+                .globals
+                .borrow()
+                .get(&Value::Str(Rc::from(b"_draw".as_slice()))),
             Value::Function(_)
         ) {
             self.call_global(b"_draw");
         }
         self.interp.host = std::ptr::null_mut();
     }
-    fn use_60fps(&self) -> bool { self.has_update60 }
-    fn had_error(&self) -> bool { self.error.is_some() }
-    fn error_message(&self) -> &str { self.error.as_deref().unwrap_or("") }
+    fn use_60fps(&self) -> bool {
+        self.has_update60
+    }
+    fn had_error(&self) -> bool {
+        self.error.is_some()
+    }
+    fn error_message(&self) -> &str {
+        self.error.as_deref().unwrap_or("")
+    }
     fn save_globals(&self) -> Vec<u8> {
         serialize::save_globals(&self.interp.globals)
     }
@@ -225,8 +261,12 @@ impl LuaImpl {
 
 fn run_str(interp: &mut Interp, src: &[u8]) -> Result<(), RtError> {
     let mut lx = lex::Lexer::new(src);
-    let toks = lx.tokenize().map_err(|e| RtError::msg(format!("shim lex: {} (line {})", e.msg, e.line)))?;
+    let toks = lx
+        .tokenize()
+        .map_err(|e| RtError::msg(format!("shim lex: {} (line {})", e.msg, e.line)))?;
     let mut p = parse::Parser::new(toks);
-    let block = p.parse_chunk().map_err(|e| RtError::msg(format!("shim parse: {} (line {})", e.msg, e.line)))?;
+    let block = p
+        .parse_chunk()
+        .map_err(|e| RtError::msg(format!("shim parse: {} (line {})", e.msg, e.line)))?;
     interp.execute_block(&block).map(|_| ())
 }

@@ -51,14 +51,14 @@ pub fn put_pixel_raw(memory: &mut Memory, sx: i32, sy: i32, col: u8) {
     if sx < x0 || sx >= x1 || sy < y0 || sy >= y1 {
         return;
     }
-    if sx < 0 || sx >= 128 || sy < 0 || sy >= 128 {
+    if !(0..128).contains(&sx) || !(0..128).contains(&sy) {
         return;
     }
     let pat = get_fill_pattern(memory);
     if pat != 0 {
-        let px = (sx as u32 & 3) as u32;
-        let py = (sy as u32 & 3) as u32;
-        let bit_idx = (py * 4 + px) as u32;
+        let px = sx as u32 & 3;
+        let py = sy as u32 & 3;
+        let bit_idx = py * 4 + px;
         if pat & (1 << bit_idx) != 0 {
             let fill_trans = memory.ram[memory::ADDR_FILL_PAT as usize + 2];
             if fill_trans & 0x1 != 0 {
@@ -80,7 +80,7 @@ pub fn put_pixel_no_cam(memory: &mut Memory, sx: i32, sy: i32, col: u8) {
     if sx < x0 || sx >= x1 || sy < y0 || sy >= y1 {
         return;
     }
-    if sx < 0 || sx >= 128 || sy < 0 || sy >= 128 {
+    if !(0..128).contains(&sx) || !(0..128).contains(&sy) {
         return;
     }
     let mapped = get_draw_pal(memory, col);
@@ -322,7 +322,17 @@ fn draw_oval(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8, f
     }
 }
 
-pub fn spr(memory: &mut Memory, n: i32, x: i32, y: i32, w: f64, h: f64, flip_x: bool, flip_y: bool) {
+#[allow(clippy::too_many_arguments)]
+pub fn spr(
+    memory: &mut Memory,
+    n: i32,
+    x: i32,
+    y: i32,
+    w: f64,
+    h: f64,
+    flip_x: bool,
+    flip_y: bool,
+) {
     let pw = (w * 8.0) as i32;
     let ph = (h * 8.0) as i32;
     let sx = (n.rem_euclid(16)) * 8;
@@ -330,6 +340,7 @@ pub fn spr(memory: &mut Memory, n: i32, x: i32, y: i32, w: f64, h: f64, flip_x: 
     draw_sprite(memory, sx, sy, x, y, pw, ph, flip_x, flip_y);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw_sprite(
     memory: &mut Memory,
     sx: i32,
@@ -346,7 +357,7 @@ pub fn draw_sprite(
         for px in 0..w {
             let src_x = sx + if flip_x { w - 1 - px } else { px };
             let src_y = sy + if flip_y { h - 1 - py } else { py };
-            if src_x < 0 || src_x >= 128 || src_y < 0 || src_y >= 128 {
+            if !(0..128).contains(&src_x) || !(0..128).contains(&src_y) {
                 continue;
             }
             let col = memory.sprite_get(src_x as u8, src_y as u8);
@@ -358,6 +369,7 @@ pub fn draw_sprite(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn sspr(
     memory: &mut Memory,
     sx: i32,
@@ -391,7 +403,7 @@ pub fn sspr(
             let ax = sx + si;
             let ay = sy + sj;
             let idx = (sj as usize) * src_w + (si as usize);
-            if ax < 0 || ax >= 128 || ay < 0 || ay >= 128 {
+            if !(0..128).contains(&ax) || !(0..128).contains(&ay) {
                 src_buf[idx] = 0;
             } else {
                 src_buf[idx] = memory.sprite_get(ax as u8, ay as u8);
@@ -416,6 +428,7 @@ pub fn sspr(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn map(
     memory: &mut Memory,
     cel_x: i32,
@@ -426,12 +439,16 @@ pub fn map(
     cel_h: i32,
     layer: i32,
 ) {
-    let map_w = if memory.ram[0x5F57] == 0 { 128 } else { memory.ram[0x5F57] as i32 };
+    let map_w = if memory.ram[0x5F57] == 0 {
+        128
+    } else {
+        memory.ram[0x5F57] as i32
+    };
     for cy in 0..cel_h {
         for cx in 0..cel_w {
             let mx = cel_x + cx;
             let my = cel_y + cy;
-            if mx < 0 || mx >= map_w || my < 0 || my >= 64 {
+            if mx < 0 || mx >= map_w || !(0..64).contains(&my) {
                 continue;
             }
             let tile = map_get_wide(memory, mx, my);
@@ -446,14 +463,28 @@ pub fn map(
             }
             let tile_sx = (tile as i32 % 16) * 8;
             let tile_sy = (tile as i32 / 16) * 8;
-            draw_sprite(memory, tile_sx, tile_sy, sx + cx * 8, sy + cy * 8, 8, 8, false, false);
+            draw_sprite(
+                memory,
+                tile_sx,
+                tile_sy,
+                sx + cx * 8,
+                sy + cy * 8,
+                8,
+                8,
+                false,
+                false,
+            );
         }
     }
 }
 
 pub fn map_get_wide(memory: &Memory, x: i32, y: i32) -> u8 {
-    let map_w = if memory.ram[0x5F57] == 0 { 128 } else { memory.ram[0x5F57] as i32 };
-    if x < 0 || x >= map_w || y < 0 || y >= 64 {
+    let map_w = if memory.ram[0x5F57] == 0 {
+        128
+    } else {
+        memory.ram[0x5F57] as i32
+    };
+    if x < 0 || x >= map_w || !(0..64).contains(&y) {
         return 0;
     }
     if x < 128 {
@@ -466,8 +497,12 @@ pub fn map_get_wide(memory: &Memory, x: i32, y: i32) -> u8 {
 }
 
 pub fn map_set_wide(memory: &mut Memory, x: i32, y: i32, val: u8) {
-    let map_w = if memory.ram[0x5F57] == 0 { 128 } else { memory.ram[0x5F57] as i32 };
-    if x < 0 || x >= map_w || y < 0 || y >= 64 {
+    let map_w = if memory.ram[0x5F57] == 0 {
+        128
+    } else {
+        memory.ram[0x5F57] as i32
+    };
+    if x < 0 || x >= map_w || !(0..64).contains(&y) {
         return;
     }
     if x < 128 {
@@ -483,7 +518,7 @@ pub fn map_set_wide(memory: &mut Memory, x: i32, y: i32, val: u8) {
 // === Print ===
 
 fn parse_hex_color(c: u8) -> u8 {
-    if (b'0'..=b'9').contains(&c) {
+    if c.is_ascii_digit() {
         c - b'0'
     } else if (b'a'..=b'f').contains(&c) {
         c - b'a' + 10
@@ -559,24 +594,20 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
                             char_w = 8;
                             char_h = 12;
                         }
-                        b'c' => {
-                            if i < text.len() {
-                                let clear_col = parse_hex_color(text[i]);
-                                i += 1;
-                                let byte = clear_col | (clear_col << 4);
-                                let s = memory.screen_base() as usize;
-                                let e = (s + 0x2000).min(memory::RAM_SIZE);
-                                for k in s..e {
-                                    memory.ram[k] = byte;
-                                }
-                                x = start_x - cam_x;
-                                y = start_y - cam_y;
+                        b'c' if i < text.len() => {
+                            let clear_col = parse_hex_color(text[i]);
+                            i += 1;
+                            let byte = clear_col | (clear_col << 4);
+                            let s = memory.screen_base() as usize;
+                            let e = (s + 0x2000).min(memory::RAM_SIZE);
+                            for k in s..e {
+                                memory.ram[k] = byte;
                             }
+                            x = start_x - cam_x;
+                            y = start_y - cam_y;
                         }
-                        b'd' => {
-                            if i < text.len() {
-                                i += 1;
-                            }
+                        b'd' if i < text.len() => {
+                            i += 1;
                         }
                         b'g' => {
                             x = home_x;
@@ -586,35 +617,25 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
                             home_x = x;
                             home_y = y;
                         }
-                        b'j' => {
-                            if i + 1 < text.len() {
-                                x += text[i] as i8 as i32;
-                                y += text[i + 1] as i8 as i32;
-                                i += 2;
-                            }
+                        b'j' if i + 1 < text.len() => {
+                            x += text[i] as i8 as i32;
+                            y += text[i + 1] as i8 as i32;
+                            i += 2;
                         }
-                        b'r' => {
-                            if i < text.len() {
-                                i += 1;
-                            }
+                        b'r' if i < text.len() => {
+                            i += 1;
                         }
-                        b's' => {
-                            if i < text.len() {
-                                tab_w = (text[i] as i32).max(1);
-                                i += 1;
-                            }
+                        b's' if i < text.len() => {
+                            tab_w = (text[i] as i32).max(1);
+                            i += 1;
                         }
-                        b'x' => {
-                            if i < text.len() {
-                                char_w = text[i] as i32;
-                                i += 1;
-                            }
+                        b'x' if i < text.len() => {
+                            char_w = text[i] as i32;
+                            i += 1;
                         }
-                        b'y' => {
-                            if i < text.len() {
-                                char_h = text[i] as i32;
-                                i += 1;
-                            }
+                        b'y' if i < text.len() => {
+                            char_h = text[i] as i32;
+                            i += 1;
                         }
                         _ => {}
                     }

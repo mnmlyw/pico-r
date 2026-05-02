@@ -31,17 +31,32 @@ impl Parser {
         Ok(block)
     }
 
-    fn peek(&self) -> &Tok { &self.toks[self.pos].tok }
-    fn line(&self) -> u32 { self.toks[self.pos].line }
+    fn peek(&self) -> &Tok {
+        &self.toks[self.pos].tok
+    }
+    fn line(&self) -> u32 {
+        self.toks[self.pos].line
+    }
     fn is(&self, t: &Tok) -> bool {
         std::mem::discriminant(self.peek()) == std::mem::discriminant(t)
     }
-    fn check(&mut self, t: &Tok) -> bool { self.is(t) }
+    fn check(&mut self, t: &Tok) -> bool {
+        self.is(t)
+    }
     fn eat(&mut self, t: &Tok) -> bool {
-        if self.is(t) { self.pos += 1; true } else { false }
+        if self.is(t) {
+            self.pos += 1;
+            true
+        } else {
+            false
+        }
     }
     fn expect(&mut self, t: &Tok, name: &str) -> Result<(), ParseError> {
-        if self.eat(t) { Ok(()) } else { Err(self.err(&format!("expected {}", name))) }
+        if self.eat(t) {
+            Ok(())
+        } else {
+            Err(self.err(&format!("expected {}", name)))
+        }
     }
     fn advance(&mut self) -> Tok {
         let t = self.toks[self.pos].tok.clone();
@@ -50,7 +65,10 @@ impl Parser {
     }
 
     fn err(&self, msg: &str) -> ParseError {
-        ParseError { msg: msg.into(), line: self.line() }
+        ParseError {
+            msg: msg.into(),
+            line: self.line(),
+        }
     }
 
     fn parse_block(&mut self) -> Result<Block, ParseError> {
@@ -59,7 +77,9 @@ impl Parser {
         let mut stat_lines = Vec::new();
         loop {
             while self.eat(&Tok::Semi) {}
-            if self.is_block_terminator() { break; }
+            if self.is_block_terminator() {
+                break;
+            }
             let stat_line = self.line();
             let s = self.parse_statement()?;
             let is_return = matches!(s, Stat::Return(_));
@@ -70,7 +90,11 @@ impl Parser {
                 break;
             }
         }
-        Ok(Block { stats, stat_lines, line })
+        Ok(Block {
+            stats,
+            stat_lines,
+            line,
+        })
     }
 
     fn is_block_terminator(&self) -> bool {
@@ -84,13 +108,24 @@ impl Parser {
         match self.peek() {
             Tok::If => self.parse_if(),
             Tok::While => self.parse_while(),
-            Tok::Do => { self.pos += 1; let b = self.parse_block()?; self.expect(&Tok::End, "'end'")?; Ok(Stat::Do(b)) }
+            Tok::Do => {
+                self.pos += 1;
+                let b = self.parse_block()?;
+                self.expect(&Tok::End, "'end'")?;
+                Ok(Stat::Do(b))
+            }
             Tok::For => self.parse_for(),
             Tok::Repeat => self.parse_repeat(),
             Tok::Function => self.parse_function_stat(),
             Tok::Local => self.parse_local(),
-            Tok::Return => { self.pos += 1; self.parse_return() }
-            Tok::Break => { self.pos += 1; Ok(Stat::Break) }
+            Tok::Return => {
+                self.pos += 1;
+                self.parse_return()
+            }
+            Tok::Break => {
+                self.pos += 1;
+                Ok(Stat::Break)
+            }
             Tok::Goto => {
                 self.pos += 1;
                 let name = self.expect_name("label name")?;
@@ -119,7 +154,11 @@ impl Parser {
             let b = self.parse_block()?;
             arms.push((c, b));
         }
-        let else_b = if self.eat(&Tok::Else) { Some(self.parse_block()?) } else { None };
+        let else_b = if self.eat(&Tok::Else) {
+            Some(self.parse_block()?)
+        } else {
+            None
+        };
         self.expect(&Tok::End, "'end'")?;
         Ok(Stat::If(arms, else_b))
     }
@@ -148,7 +187,11 @@ impl Parser {
             let a = self.parse_expr()?;
             self.expect(&Tok::Comma, "','")?;
             let b = self.parse_expr()?;
-            let c = if self.eat(&Tok::Comma) { Some(self.parse_expr()?) } else { None };
+            let c = if self.eat(&Tok::Comma) {
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
             self.expect(&Tok::Do, "'do'")?;
             let body = self.parse_block()?;
             self.expect(&Tok::End, "'end'")?;
@@ -161,7 +204,9 @@ impl Parser {
         }
         self.expect(&Tok::In, "'in'")?;
         let mut exprs = vec![self.parse_expr()?];
-        while self.eat(&Tok::Comma) { exprs.push(self.parse_expr()?); }
+        while self.eat(&Tok::Comma) {
+            exprs.push(self.parse_expr()?);
+        }
         self.expect(&Tok::Do, "'do'")?;
         let body = self.parse_block()?;
         self.expect(&Tok::End, "'end'")?;
@@ -184,7 +229,7 @@ impl Parser {
         if let Some(m) = method_name {
             // add `self` as first param
             let mut params = vec![Rc::<str>::from("self")];
-            params.extend(body.params.into_iter());
+            params.extend(body.params);
             body.params = params;
             e = Expr::Field(Box::new(e), m);
         }
@@ -199,8 +244,14 @@ impl Parser {
             return Ok(Stat::LocalFunction(name, body));
         }
         let mut names = vec![self.expect_name("name")?];
-        while self.eat(&Tok::Comma) { names.push(self.expect_name("name")?); }
-        let exprs = if self.eat(&Tok::Assign) { self.parse_exp_list()? } else { Vec::new() };
+        while self.eat(&Tok::Comma) {
+            names.push(self.expect_name("name")?);
+        }
+        let exprs = if self.eat(&Tok::Assign) {
+            self.parse_exp_list()?
+        } else {
+            Vec::new()
+        };
         Ok(Stat::LocalAssign(names, exprs))
     }
 
@@ -220,21 +271,33 @@ impl Parser {
         let mut is_vararg = false;
         if !self.is(&Tok::RParen) {
             loop {
-                if self.eat(&Tok::Vararg) { is_vararg = true; break; }
+                if self.eat(&Tok::Vararg) {
+                    is_vararg = true;
+                    break;
+                }
                 let n = self.expect_name("parameter")?;
                 params.push(n);
-                if !self.eat(&Tok::Comma) { break; }
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
             }
         }
         self.expect(&Tok::RParen, "')'")?;
         let body = self.parse_block()?;
         self.expect(&Tok::End, "'end'")?;
-        Ok(FuncBody { params, is_vararg, body, line })
+        Ok(FuncBody {
+            params,
+            is_vararg,
+            body,
+            line,
+        })
     }
 
     fn parse_exp_list(&mut self) -> Result<Vec<Expr>, ParseError> {
         let mut v = vec![self.parse_expr()?];
-        while self.eat(&Tok::Comma) { v.push(self.parse_expr()?); }
+        while self.eat(&Tok::Comma) {
+            v.push(self.parse_expr()?);
+        }
         Ok(v)
     }
 
@@ -287,8 +350,13 @@ impl Parser {
                 Tok::Caret => (Some(BinOp::Pow), 10, 9), // right-assoc, binds higher than unary
                 _ => (None, 0, 0),
             };
-            let op = match op { Some(o) => o, None => break };
-            if lprec < min_prec { break; }
+            let op = match op {
+                Some(o) => o,
+                None => break,
+            };
+            if lprec < min_prec {
+                break;
+            }
             self.pos += 1;
             let right = self.parse_binop(rprec + 1)?;
             left = Expr::BinOp(op, Box::new(left), Box::new(right));
@@ -298,9 +366,21 @@ impl Parser {
 
     fn parse_unary(&mut self) -> Result<Expr, ParseError> {
         match self.peek() {
-            Tok::Not => { self.pos += 1; let e = self.parse_binop(8)?; Ok(Expr::UnOp(UnOp::Not, Box::new(e))) }
-            Tok::Minus => { self.pos += 1; let e = self.parse_binop(8)?; Ok(Expr::UnOp(UnOp::Neg, Box::new(e))) }
-            Tok::Hash => { self.pos += 1; let e = self.parse_binop(8)?; Ok(Expr::UnOp(UnOp::Len, Box::new(e))) }
+            Tok::Not => {
+                self.pos += 1;
+                let e = self.parse_binop(8)?;
+                Ok(Expr::UnOp(UnOp::Not, Box::new(e)))
+            }
+            Tok::Minus => {
+                self.pos += 1;
+                let e = self.parse_binop(8)?;
+                Ok(Expr::UnOp(UnOp::Neg, Box::new(e)))
+            }
+            Tok::Hash => {
+                self.pos += 1;
+                let e = self.parse_binop(8)?;
+                Ok(Expr::UnOp(UnOp::Len, Box::new(e)))
+            }
             _ => self.parse_suffixed_expr(),
         }
     }
@@ -352,7 +432,9 @@ impl Parser {
         let mut args = Vec::new();
         if !self.is(&Tok::RParen) {
             args.push(self.parse_expr()?);
-            while self.eat(&Tok::Comma) { args.push(self.parse_expr()?); }
+            while self.eat(&Tok::Comma) {
+                args.push(self.parse_expr()?);
+            }
         }
         self.expect(&Tok::RParen, "')'")?;
         Ok(args)
@@ -360,13 +442,35 @@ impl Parser {
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match self.peek().clone() {
-            Tok::Nil => { self.pos += 1; Ok(Expr::Nil) }
-            Tok::True => { self.pos += 1; Ok(Expr::True) }
-            Tok::False => { self.pos += 1; Ok(Expr::False) }
-            Tok::Number(n) => { self.pos += 1; Ok(Expr::Number(n)) }
-            Tok::Str(b) => { self.pos += 1; Ok(Expr::Str(b)) }
-            Tok::Vararg => { self.pos += 1; Ok(Expr::Vararg) }
-            Tok::Function => { self.pos += 1; let body = self.parse_funcbody()?; Ok(Expr::Function(body)) }
+            Tok::Nil => {
+                self.pos += 1;
+                Ok(Expr::Nil)
+            }
+            Tok::True => {
+                self.pos += 1;
+                Ok(Expr::True)
+            }
+            Tok::False => {
+                self.pos += 1;
+                Ok(Expr::False)
+            }
+            Tok::Number(n) => {
+                self.pos += 1;
+                Ok(Expr::Number(n))
+            }
+            Tok::Str(b) => {
+                self.pos += 1;
+                Ok(Expr::Str(b))
+            }
+            Tok::Vararg => {
+                self.pos += 1;
+                Ok(Expr::Vararg)
+            }
+            Tok::Function => {
+                self.pos += 1;
+                let body = self.parse_funcbody()?;
+                Ok(Expr::Function(body))
+            }
             Tok::LParen => {
                 self.pos += 1;
                 let e = self.parse_expr()?;
@@ -374,7 +478,10 @@ impl Parser {
                 Ok(e)
             }
             Tok::LBrace => self.parse_table_constructor(),
-            Tok::Name(n) => { self.pos += 1; Ok(Expr::Name(n)) }
+            Tok::Name(n) => {
+                self.pos += 1;
+                Ok(Expr::Name(n))
+            }
             _ => Err(self.err("unexpected token in expression")),
         }
     }
@@ -391,7 +498,12 @@ impl Parser {
                 let v = self.parse_expr()?;
                 TableField::KV(k, v)
             } else if let Tok::Name(n) = self.peek().clone() {
-                if self.toks.get(self.pos + 1).map(|t| matches!(&t.tok, Tok::Assign)).unwrap_or(false) {
+                if self
+                    .toks
+                    .get(self.pos + 1)
+                    .map(|t| matches!(&t.tok, Tok::Assign))
+                    .unwrap_or(false)
+                {
                     self.pos += 2;
                     let v = self.parse_expr()?;
                     TableField::KV(Expr::Str(Rc::from(n.as_bytes())), v)
@@ -402,7 +514,9 @@ impl Parser {
                 TableField::Array(self.parse_expr()?)
             };
             fields.push(field);
-            if !self.eat(&Tok::Comma) && !self.eat(&Tok::Semi) { break; }
+            if !self.eat(&Tok::Comma) && !self.eat(&Tok::Semi) {
+                break;
+            }
         }
         self.expect(&Tok::RBrace, "'}'")?;
         Ok(Expr::Table(fields))

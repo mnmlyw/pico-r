@@ -12,6 +12,12 @@ pub struct Input {
     pub key_chars_len: u8,
 }
 
+impl Default for Input {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Input {
     pub fn new() -> Self {
         Self {
@@ -61,12 +67,20 @@ impl Input {
         }
         let initial_raw = memory.ram[0x5F5C];
         let repeat_raw = memory.ram[0x5F5D];
-        let initial: u16 = if initial_raw == 0 { 15 } else { initial_raw as u16 };
+        let initial: u16 = if initial_raw == 0 {
+            15
+        } else {
+            initial_raw as u16
+        };
         if initial == 255 {
             return false;
         }
-        let repeat: u16 = if repeat_raw == 0 { 4 } else { repeat_raw as u16 };
-        if held >= initial && (held - initial) % repeat == 0 {
+        let repeat: u16 = if repeat_raw == 0 {
+            4
+        } else {
+            repeat_raw as u16
+        };
+        if held >= initial && (held - initial).is_multiple_of(repeat) {
             return true;
         }
         false

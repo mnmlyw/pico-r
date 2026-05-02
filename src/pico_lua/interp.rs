@@ -58,7 +58,7 @@ impl Interp {
     }
 
     /// Access the host PICO-8 state. Caller must guarantee `host` is set.
-    pub fn host(&self) -> &mut PicoState {
+    pub fn host(&mut self) -> &mut PicoState {
         unsafe { &mut *self.host }
     }
 
@@ -83,16 +83,22 @@ impl Interp {
         if let Some(slot) = self.find_slot(name) {
             return slot.borrow().clone();
         }
-        self.globals.borrow().get(&Value::Str(Rc::from(name.as_bytes())))
+        self.globals
+            .borrow()
+            .get(&Value::Str(Rc::from(name.as_bytes())))
     }
 
     fn find_slot(&self, name: &str) -> Option<Rc<RefCell<Value>>> {
         let frame = self.frames.last()?;
         for (n, slot) in frame.locals.iter().rev() {
-            if &**n == name { return Some(Rc::clone(slot)); }
+            if &**n == name {
+                return Some(Rc::clone(slot));
+            }
         }
         for (n, slot) in frame.upvalues.iter() {
-            if &**n == name { return Some(Rc::clone(slot)); }
+            if &**n == name {
+                return Some(Rc::clone(slot));
+            }
         }
         None
     }
@@ -101,7 +107,9 @@ impl Interp {
         if let Some(slot) = self.find_slot(name) {
             *slot.borrow_mut() = val;
         } else {
-            self.globals.borrow_mut().set(Value::Str(Rc::from(name.as_bytes())), val);
+            self.globals
+                .borrow_mut()
+                .set(Value::Str(Rc::from(name.as_bytes())), val);
         }
     }
 
@@ -130,19 +138,32 @@ impl Interp {
     fn execute_block_inner(&mut self, block: &Block, pop_locals: bool) -> Result<Flow, RtError> {
         let mut i = 0;
         let saved_locals = self.frames.last().map(|f| f.locals.len()).unwrap_or(0);
-        if block.line > 0 { self.current_line = block.line; }
+        if block.line > 0 {
+            self.current_line = block.line;
+        }
         let result = loop {
-            if i >= block.stats.len() { break Ok(Flow::Normal); }
-            if let Some(&l) = block.stat_lines.get(i) { if l > 0 { self.current_line = l; } }
+            if i >= block.stats.len() {
+                break Ok(Flow::Normal);
+            }
+            if let Some(&l) = block.stat_lines.get(i) {
+                if l > 0 {
+                    self.current_line = l;
+                }
+            }
             let stat = &block.stats[i];
             match self.execute_statement(stat) {
-                Ok(Flow::Normal) => { i += 1; }
+                Ok(Flow::Normal) => {
+                    i += 1;
+                }
                 Ok(Flow::Goto(label)) => {
                     // Try to find label in this block (forward or backward)
                     let mut found = None;
                     for (idx, s) in block.stats.iter().enumerate() {
                         if let Stat::Label(n) = s {
-                            if n == &label { found = Some(idx); break; }
+                            if n == &label {
+                                found = Some(idx);
+                                break;
+                            }
                         }
                     }
                     if let Some(idx) = found {
@@ -190,17 +211,17 @@ impl Interp {
                 Ok(Flow::Normal)
             }
             Stat::Do(b) => self.execute_block(b),
-            Stat::While(cond, body) => {
-                loop {
-                    let c = self.eval_expr_single(cond)?;
-                    if !c.truthy() { return Ok(Flow::Normal); }
-                    match self.execute_block(body)? {
-                        Flow::Normal => {}
-                        Flow::Break => return Ok(Flow::Normal),
-                        other => return Ok(other),
-                    }
+            Stat::While(cond, body) => loop {
+                let c = self.eval_expr_single(cond)?;
+                if !c.truthy() {
+                    return Ok(Flow::Normal);
                 }
-            }
+                match self.execute_block(body)? {
+                    Flow::Normal => {}
+                    Flow::Break => return Ok(Flow::Normal),
+                    other => return Ok(other),
+                }
+            },
             Stat::Repeat(body, cond) => {
                 // Lua semantics: `until` condition is evaluated in the scope of
                 // the body, so we must NOT pop the body's locals before checking.
@@ -210,23 +231,33 @@ impl Interp {
                     let flow = match r {
                         Ok(Flow::Normal) => Flow::Normal,
                         Ok(Flow::Break) => {
-                            if let Some(f) = self.frames.last_mut() { f.locals.truncate(saved_locals); }
+                            if let Some(f) = self.frames.last_mut() {
+                                f.locals.truncate(saved_locals);
+                            }
                             return Ok(Flow::Normal);
                         }
                         Ok(other) => {
-                            if let Some(f) = self.frames.last_mut() { f.locals.truncate(saved_locals); }
+                            if let Some(f) = self.frames.last_mut() {
+                                f.locals.truncate(saved_locals);
+                            }
                             return Ok(other);
                         }
                         Err(e) => {
-                            if let Some(f) = self.frames.last_mut() { f.locals.truncate(saved_locals); }
+                            if let Some(f) = self.frames.last_mut() {
+                                f.locals.truncate(saved_locals);
+                            }
                             return Err(e);
                         }
                     };
                     let _ = flow;
                     let c = self.eval_expr_single(cond)?;
                     // Now pop the body's locals
-                    if let Some(f) = self.frames.last_mut() { f.locals.truncate(saved_locals); }
-                    if c.truthy() { return Ok(Flow::Normal); }
+                    if let Some(f) = self.frames.last_mut() {
+                        f.locals.truncate(saved_locals);
+                    }
+                    if c.truthy() {
+                        return Ok(Flow::Normal);
+                    }
                 }
             }
             Stat::If(arms, else_b) => {
@@ -250,9 +281,15 @@ impl Interp {
                 };
                 let mut i = start;
                 loop {
-                    if step > 0.0 && i > stop { break; }
-                    if step < 0.0 && i < stop { break; }
-                    if step == 0.0 { return Err(RtError::msg("'for' step is zero")); }
+                    if step > 0.0 && i > stop {
+                        break;
+                    }
+                    if step < 0.0 && i < stop {
+                        break;
+                    }
+                    if step == 0.0 {
+                        return Err(RtError::msg("'for' step is zero"));
+                    }
                     self.push_block_with_local(name, Value::Number(i));
                     let r = self.execute_block(body);
                     self.pop_block_local();
@@ -267,13 +304,15 @@ impl Interp {
             }
             Stat::GenericFor(names, exprs, body) => {
                 let vals = self.eval_exp_list(exprs, 3)?;
-                let iter = vals.get(0).cloned().unwrap_or(Value::Nil);
+                let iter = vals.first().cloned().unwrap_or(Value::Nil);
                 let state = vals.get(1).cloned().unwrap_or(Value::Nil);
                 let mut control = vals.get(2).cloned().unwrap_or(Value::Nil);
                 loop {
                     let result = self.call_value(&iter, vec![state.clone(), control.clone()])?;
-                    let first = result.get(0).cloned().unwrap_or(Value::Nil);
-                    if matches!(first, Value::Nil) { return Ok(Flow::Normal); }
+                    let first = result.first().cloned().unwrap_or(Value::Nil);
+                    if matches!(first, Value::Nil) {
+                        return Ok(Flow::Normal);
+                    }
                     control = first.clone();
 
                     // Push frame-locals for each name; restore on iteration end
@@ -369,7 +408,8 @@ impl Interp {
                     match idx {
                         Value::Table(_) => return self.table_get(&idx, k),
                         Value::Function(_) => {
-                            return self.call_value(&idx, vec![t.clone(), k.clone()])
+                            return self
+                                .call_value(&idx, vec![t.clone(), k.clone()])
                                 .map(|mut r| r.drain(..).next().unwrap_or(Value::Nil));
                         }
                         _ => {}
@@ -414,7 +454,10 @@ impl Interp {
             Expr::Number(n) => Ok(vec![Value::Number(*n)]),
             Expr::Str(b) => Ok(vec![Value::Str(Rc::clone(b))]),
             Expr::Vararg => {
-                let frame = self.frames.last().ok_or_else(|| RtError::msg("no varargs"))?;
+                let frame = self
+                    .frames
+                    .last()
+                    .ok_or_else(|| RtError::msg("no varargs"))?;
                 Ok(frame.varargs.clone())
             }
             Expr::Name(n) => Ok(vec![self.resolve(n)]),
@@ -510,12 +553,16 @@ impl Interp {
         match op {
             BinOp::And => {
                 let va = self.eval_expr_single(a)?;
-                if !va.truthy() { return Ok(va); }
+                if !va.truthy() {
+                    return Ok(va);
+                }
                 self.eval_expr_single(b)
             }
             BinOp::Or => {
                 let va = self.eval_expr_single(a)?;
-                if va.truthy() { return Ok(va); }
+                if va.truthy() {
+                    return Ok(va);
+                }
                 self.eval_expr_single(b)
             }
             _ => {
@@ -530,21 +577,29 @@ impl Interp {
         use BinOp::*;
         match op {
             Add | Sub | Mul | Div | Mod | Pow => {
-                let x = a.as_number().ok_or_else(|| RtError::msg(format!("arith on {}", a.type_name())))?;
-                let y = b.as_number().ok_or_else(|| RtError::msg(format!("arith on {}", b.type_name())))?;
+                let x = a
+                    .as_number()
+                    .ok_or_else(|| RtError::msg(format!("arith on {}", a.type_name())))?;
+                let y = b
+                    .as_number()
+                    .ok_or_else(|| RtError::msg(format!("arith on {}", b.type_name())))?;
                 Ok(Value::Number(match op {
                     Add => x + y,
                     Sub => x - y,
                     Mul => x * y,
                     Div => x / y,
-                    Mod => { let r = x - y * (x / y).floor(); r }
+                    Mod => x - y * (x / y).floor(),
                     Pow => x.powf(y),
                     _ => unreachable!(),
                 }))
             }
             Concat => {
-                let sa = a.as_str().ok_or_else(|| RtError::msg(format!("concat {}", a.type_name())))?;
-                let sb = b.as_str().ok_or_else(|| RtError::msg(format!("concat {}", b.type_name())))?;
+                let sa = a
+                    .as_str()
+                    .ok_or_else(|| RtError::msg(format!("concat {}", a.type_name())))?;
+                let sb = b
+                    .as_str()
+                    .ok_or_else(|| RtError::msg(format!("concat {}", b.type_name())))?;
                 let mut out = Vec::with_capacity(sa.len() + sb.len());
                 out.extend_from_slice(&sa);
                 out.extend_from_slice(&sb);
@@ -565,7 +620,10 @@ impl Interp {
     }
 
     fn compare<F, G>(&self, a: &Value, b: &Value, fnum: F, fstr: G) -> Result<Value, RtError>
-    where F: Fn(f64, f64) -> bool, G: Fn(&[u8], &[u8]) -> bool {
+    where
+        F: Fn(f64, f64) -> bool,
+        G: Fn(&[u8], &[u8]) -> bool,
+    {
         match (a, b) {
             (Value::Number(x), Value::Number(y)) => Ok(Value::Bool(fnum(*x, *y))),
             (Value::Str(x), Value::Str(y)) => Ok(Value::Bool(fstr(x, y))),
@@ -573,7 +631,9 @@ impl Interp {
             // but the cart may rely on missing fields defaulting to 0 in some places.
             // For now, raise — this surfaces missing-field bugs in the cart.
             _ => Err(RtError::msg(format!(
-                "compare {} with {}", a.type_name(), b.type_name()
+                "compare {} with {}",
+                a.type_name(),
+                b.type_name()
             ))),
         }
     }
@@ -582,7 +642,9 @@ impl Interp {
         let v = self.eval_expr_single(e)?;
         match op {
             UnOp::Neg => {
-                let n = v.as_number().ok_or_else(|| RtError::msg("negate non-number"))?;
+                let n = v
+                    .as_number()
+                    .ok_or_else(|| RtError::msg("negate non-number"))?;
                 Ok(Value::Number(-n))
             }
             UnOp::Not => Ok(Value::Bool(!v.truthy())),
@@ -598,11 +660,16 @@ impl Interp {
         // Capture all currently-visible locals + upvalues as upvalues for the closure.
         // Simple approach: scan the function body for free names, capture matching slots.
         let mut upvalues: Vec<(Rc<str>, Rc<RefCell<Value>>)> = Vec::new();
-        let frame = match self.frames.last() { Some(f) => f, None => return Ok(Rc::new(LuaClosure {
-            body: Rc::new(body.clone()),
-            upvalues: Vec::new(),
-            upnames: Vec::new(),
-        }))};
+        let frame = match self.frames.last() {
+            Some(f) => f,
+            None => {
+                return Ok(Rc::new(LuaClosure {
+                    body: Rc::new(body.clone()),
+                    upvalues: Vec::new(),
+                    upnames: Vec::new(),
+                }))
+            }
+        };
         // Capture a snapshot of all current locals + outer upvalues.
         for (n, slot) in &frame.locals {
             upvalues.push((Rc::clone(n), Rc::clone(slot)));
@@ -624,12 +691,8 @@ impl Interp {
 
     pub fn call_value(&mut self, f: &Value, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
         match f {
-            Value::Function(Function::Native(n)) => {
-                (n.func)(self, args)
-            }
-            Value::Function(Function::Lua(c)) => {
-                self.call_lua_closure(c, args)
-            }
+            Value::Function(Function::Native(n)) => (n.func)(self, args),
+            Value::Function(Function::Lua(c)) => self.call_lua_closure(c, args),
             Value::Table(t) => {
                 // __call metamethod
                 let mt = t.borrow().metatable.clone();
@@ -643,27 +706,41 @@ impl Interp {
                 }
                 Err(RtError::msg("attempt to call a table value"))
             }
-            v => Err(RtError::msg(format!("attempt to call a {} value", v.type_name()))),
+            v => Err(RtError::msg(format!(
+                "attempt to call a {} value",
+                v.type_name()
+            ))),
         }
     }
 
-    fn call_lua_closure(&mut self, c: &Rc<LuaClosure>, mut args: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    fn call_lua_closure(
+        &mut self,
+        c: &Rc<LuaClosure>,
+        mut args: Vec<Value>,
+    ) -> Result<Vec<Value>, RtError> {
         let body = Rc::clone(&c.body);
         let mut frame = Frame {
             locals: Vec::new(),
             varargs: Vec::new(),
-            upvalues: c.upnames.iter().cloned().zip(c.upvalues.iter().cloned()).collect(),
+            upvalues: c
+                .upnames
+                .iter()
+                .cloned()
+                .zip(c.upvalues.iter().cloned())
+                .collect(),
         };
         // Bind params
         let n_params = body.params.len();
         for (i, p) in body.params.iter().enumerate() {
-            let v = if i < args.len() { args[i].clone() } else { Value::Nil };
+            let v = if i < args.len() {
+                args[i].clone()
+            } else {
+                Value::Nil
+            };
             frame.locals.push((Rc::clone(p), Rc::new(RefCell::new(v))));
         }
-        if body.is_vararg {
-            if args.len() > n_params {
-                frame.varargs = args.drain(n_params..).collect();
-            }
+        if body.is_vararg && args.len() > n_params {
+            frame.varargs = args.drain(n_params..).collect();
         }
         self.frames.push(frame);
         let result = self.execute_block(&body.body);
@@ -679,5 +756,6 @@ impl Interp {
 }
 
 fn num_or_err(v: Value, what: &str) -> Result<f64, RtError> {
-    v.as_number().ok_or_else(|| RtError::msg(format!("{} must be a number", what)))
+    v.as_number()
+        .ok_or_else(|| RtError::msg(format!("{} must be a number", what)))
 }

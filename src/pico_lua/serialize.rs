@@ -29,16 +29,24 @@ pub fn save_globals(globals: &Rc<Table>) -> Vec<u8> {
     // Count serializable pairs
     let mut count: u32 = 0;
     for (k, v) in g.map.iter() {
-        if !is_serializable(v) { continue; }
-        if !is_serializable_key(k) { continue; }
+        if !is_serializable(v) {
+            continue;
+        }
+        if !is_serializable_key(k) {
+            continue;
+        }
         count += 1;
     }
     // Header: u32 magic, u32 count
     buf.extend_from_slice(b"PICR");
     buf.extend_from_slice(&count.to_le_bytes());
     for (k, v) in g.map.iter() {
-        if !is_serializable(v) { continue; }
-        if !is_serializable_key(k) { continue; }
+        if !is_serializable(v) {
+            continue;
+        }
+        if !is_serializable_key(k) {
+            continue;
+        }
         write_key(&mut buf, k);
         write_value(&mut buf, v, &mut seen, &mut next_id);
     }
@@ -55,10 +63,22 @@ fn is_serializable_key(k: &Key) -> bool {
 
 fn write_key(buf: &mut Vec<u8>, k: &Key) {
     match k {
-        Key::Bool(b) => { buf.push(if *b { 0x02 } else { 0x01 }); }
-        Key::Int(i) => { buf.push(0x03); buf.extend_from_slice(&(*i as f64).to_le_bytes()); }
-        Key::Float(bits) => { buf.push(0x03); buf.extend_from_slice(&bits.to_le_bytes()); }
-        Key::Str(s) => { buf.push(0x04); buf.extend_from_slice(&(s.len() as u32).to_le_bytes()); buf.extend_from_slice(s); }
+        Key::Bool(b) => {
+            buf.push(if *b { 0x02 } else { 0x01 });
+        }
+        Key::Int(i) => {
+            buf.push(0x03);
+            buf.extend_from_slice(&(*i as f64).to_le_bytes());
+        }
+        Key::Float(bits) => {
+            buf.push(0x03);
+            buf.extend_from_slice(&bits.to_le_bytes());
+        }
+        Key::Str(s) => {
+            buf.push(0x04);
+            buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
+            buf.extend_from_slice(s);
+        }
         Key::Table(_) | Key::Function(_) => {} // unreachable due to filter
     }
 }
@@ -67,8 +87,15 @@ fn write_value(buf: &mut Vec<u8>, v: &Value, seen: &mut HashMap<usize, u32>, nex
     match v {
         Value::Nil => buf.push(0x00),
         Value::Bool(b) => buf.push(if *b { 0x02 } else { 0x01 }),
-        Value::Number(n) => { buf.push(0x03); buf.extend_from_slice(&n.to_le_bytes()); }
-        Value::Str(s) => { buf.push(0x04); buf.extend_from_slice(&(s.len() as u32).to_le_bytes()); buf.extend_from_slice(s); }
+        Value::Number(n) => {
+            buf.push(0x03);
+            buf.extend_from_slice(&n.to_le_bytes());
+        }
+        Value::Str(s) => {
+            buf.push(0x04);
+            buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
+            buf.extend_from_slice(s);
+        }
         Value::Function(_) => buf.push(0x00), // skip funcs as nil
         Value::Table(t) => {
             let ptr = Rc::as_ptr(t) as usize;
@@ -83,8 +110,12 @@ fn write_value(buf: &mut Vec<u8>, v: &Value, seen: &mut HashMap<usize, u32>, nex
             buf.push(0x06);
             buf.extend_from_slice(&id.to_le_bytes());
             for (k, vv) in t.borrow().map.iter() {
-                if !is_serializable(vv) { continue; }
-                if !is_serializable_key(k) { continue; }
+                if !is_serializable(vv) {
+                    continue;
+                }
+                if !is_serializable_key(k) {
+                    continue;
+                }
                 write_key(buf, k);
                 write_value(buf, vv, seen, next_id);
             }
@@ -103,22 +134,40 @@ pub struct Loader<'a> {
 
 impl<'a> Loader<'a> {
     pub fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0, tables: HashMap::new() }
+        Self {
+            data,
+            pos: 0,
+            tables: HashMap::new(),
+        }
     }
 
     pub fn read_u8(&mut self) -> Option<u8> {
-        if self.pos >= self.data.len() { return None; }
-        let b = self.data[self.pos]; self.pos += 1; Some(b)
+        if self.pos >= self.data.len() {
+            return None;
+        }
+        let b = self.data[self.pos];
+        self.pos += 1;
+        Some(b)
     }
     pub fn read_u32(&mut self) -> Option<u32> {
-        if self.pos + 4 > self.data.len() { return None; }
-        let v = u32::from_le_bytes([self.data[self.pos], self.data[self.pos+1], self.data[self.pos+2], self.data[self.pos+3]]);
-        self.pos += 4; Some(v)
+        if self.pos + 4 > self.data.len() {
+            return None;
+        }
+        let v = u32::from_le_bytes([
+            self.data[self.pos],
+            self.data[self.pos + 1],
+            self.data[self.pos + 2],
+            self.data[self.pos + 3],
+        ]);
+        self.pos += 4;
+        Some(v)
     }
     pub fn read_f64(&mut self) -> Option<f64> {
-        if self.pos + 8 > self.data.len() { return None; }
+        if self.pos + 8 > self.data.len() {
+            return None;
+        }
         let mut b = [0u8; 8];
-        b.copy_from_slice(&self.data[self.pos..self.pos+8]);
+        b.copy_from_slice(&self.data[self.pos..self.pos + 8]);
         self.pos += 8;
         Some(f64::from_le_bytes(b))
     }
@@ -132,8 +181,10 @@ impl<'a> Loader<'a> {
             0x03 => Some(Value::Number(self.read_f64()?)),
             0x04 => {
                 let len = self.read_u32()? as usize;
-                if self.pos + len > self.data.len() { return None; }
-                let s = Rc::from(&self.data[self.pos..self.pos+len]);
+                if self.pos + len > self.data.len() {
+                    return None;
+                }
+                let s = Rc::from(&self.data[self.pos..self.pos + len]);
                 self.pos += len;
                 Some(Value::Str(s))
             }
@@ -147,7 +198,9 @@ impl<'a> Loader<'a> {
                 self.tables.insert(id, Rc::clone(&t));
                 loop {
                     let k = self.read_key()?;
-                    if k.is_none() { break; }
+                    if k.is_none() {
+                        break;
+                    }
                     let v = self.read_value()?;
                     t.borrow_mut().set(k.unwrap(), v);
                 }
@@ -167,8 +220,10 @@ impl<'a> Loader<'a> {
             0x03 => Some(Some(Value::Number(self.read_f64()?))),
             0x04 => {
                 let len = self.read_u32()? as usize;
-                if self.pos + len > self.data.len() { return None; }
-                let s = Rc::from(&self.data[self.pos..self.pos+len]);
+                if self.pos + len > self.data.len() {
+                    return None;
+                }
+                let s = Rc::from(&self.data[self.pos..self.pos + len]);
                 self.pos += len;
                 Some(Some(Value::Str(s)))
             }
@@ -184,20 +239,26 @@ pub fn load_globals(globals: &Rc<Table>, data: &[u8]) -> Result<(), String> {
     // Wipe non-function globals so previous-frame state doesn't leak.
     let to_remove: Vec<Key> = {
         let g = globals.borrow();
-        g.map.iter()
+        g.map
+            .iter()
             .filter(|(_, v)| !matches!(v, Value::Function(_)))
             .map(|(k, _)| k.clone())
             .collect()
     };
     {
         let mut g = globals.borrow_mut();
-        for k in to_remove { g.map.remove(&k); }
+        for k in to_remove {
+            g.map.remove(&k);
+        }
     }
     let mut ld = Loader::new(data);
     ld.pos = 4;
     let count = ld.read_u32().ok_or("truncated header")?;
     for _ in 0..count {
-        let k = ld.read_key().ok_or("truncated key")?.ok_or("nil key in globals")?;
+        let k = ld
+            .read_key()
+            .ok_or("truncated key")?
+            .ok_or("nil key in globals")?;
         let v = ld.read_value().ok_or("truncated value")?;
         let existing = globals.borrow().get(&k);
         if !matches!(existing, Value::Function(_)) {

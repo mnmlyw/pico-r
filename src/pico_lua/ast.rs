@@ -2,13 +2,13 @@ use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub enum Stat {
-    Assign(Vec<Expr>, Vec<Expr>),                // lhs..., rhs...
+    Assign(Vec<Expr>, Vec<Expr>), // lhs..., rhs...
     LocalAssign(Vec<Rc<str>>, Vec<Expr>),
-    Call(Expr),                                  // call as statement
+    Call(Expr), // call as statement
     Do(Block),
     While(Expr, Block),
     Repeat(Block, Expr),
-    If(Vec<(Expr, Block)>, Option<Block>),       // arms (cond, block) + optional else
+    If(Vec<(Expr, Block)>, Option<Block>), // arms (cond, block) + optional else
     NumericFor(Rc<str>, Expr, Expr, Option<Expr>, Block), // name, start, stop, step, body
     GenericFor(Vec<Rc<str>>, Vec<Expr>, Block),
     LocalFunction(Rc<str>, FuncBody),
@@ -33,11 +33,11 @@ pub enum Expr {
     Number(f64),
     Str(Rc<[u8]>),
     Vararg,
-    Name(Rc<str>),                               // Resolution to local/upvalue/global at eval time
-    Index(Box<Expr>, Box<Expr>),                 // t[k]
-    Field(Box<Expr>, Rc<str>),                   // t.k
+    Name(Rc<str>),               // Resolution to local/upvalue/global at eval time
+    Index(Box<Expr>, Box<Expr>), // t[k]
+    Field(Box<Expr>, Rc<str>),   // t.k
     Call(Box<Expr>, Vec<Expr>),
-    MethodCall(Box<Expr>, Rc<str>, Vec<Expr>),   // obj:method(args)
+    MethodCall(Box<Expr>, Rc<str>, Vec<Expr>), // obj:method(args)
     Function(FuncBody),
     BinOp(BinOp, Box<Expr>, Box<Expr>),
     UnOp(UnOp, Box<Expr>),
@@ -46,20 +46,34 @@ pub enum Expr {
 
 #[derive(Debug, Clone)]
 pub enum TableField {
-    Array(Expr),                                 // implicit numeric key
-    KV(Expr, Expr),                              // [k]=v or k=v
+    Array(Expr),    // implicit numeric key
+    KV(Expr, Expr), // [k]=v or k=v
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum BinOp {
-    Add, Sub, Mul, Div, Mod, Pow, Concat,
-    Eq, NotEq, Lt, Le, Gt, Ge,
-    And, Or,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Pow,
+    Concat,
+    Eq,
+    NotEq,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    And,
+    Or,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum UnOp {
-    Neg, Not, Len,
+    Neg,
+    Not,
+    Len,
 }
 
 #[derive(Debug, Clone)]
