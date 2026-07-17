@@ -1093,6 +1093,8 @@ fn api_line(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         st.line_x = x1;
         st.line_y = y1;
         st.line_valid = true;
+        st.memory.poke16(mem::ADDR_LINE_X, x1 as u16);
+        st.memory.poke16(mem::ADDR_LINE_Y, y1 as u16);
         return Ok(vec![]);
     }
     let x0 = arg_int(&a, 0).unwrap_or(0);
@@ -1104,6 +1106,8 @@ fn api_line(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     st.line_x = x1;
     st.line_y = y1;
     st.line_valid = true;
+    st.memory.poke16(mem::ADDR_LINE_X, x1 as u16);
+    st.memory.poke16(mem::ADDR_LINE_Y, y1 as u16);
     Ok(vec![])
 }
 fn api_rect(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -1379,8 +1383,19 @@ fn api_pal(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     }
     if let Some(Value::Table(t)) = a.first() {
         let p = opt_int(&a, 1, 0);
-        for k in 0..16 {
-            let v = t.borrow().get(&num(k as f64));
+        if p == 2 {
+            // Secondary/pen palette (used by fillp's alternate color) --
+            // confirmed against official PICO-8 that this must NOT touch
+            // the draw palette at 0x5f00. Its own storage/effect isn't
+            // implemented yet; a safe no-op is still more correct than
+            // corrupting the draw palette.
+            return Ok(vec![]);
+        }
+        // Confirmed against official PICO-8: out-of-range table keys wrap
+        // via `% 16` (pal({[20]=5}) remaps color 4, not dropped).
+        for (key, v) in t.borrow().map.iter() {
+            let Key::Int(key) = key else { continue };
+            let k = key.rem_euclid(16) as usize;
             if !matches!(v, Value::Nil) {
                 let val = (v.as_number().unwrap_or(0.0) as i32 & 0xF) as u8;
                 if p == 1 {
@@ -1396,6 +1411,10 @@ fn api_pal(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let c0 = arg_int(&a, 0).unwrap_or(0) as u8 & 0xF;
     let c1 = arg_int(&a, 1).unwrap_or(0) as u8 & 0xF;
     let p = opt_int(&a, 2, 0);
+    if p == 2 {
+        // See the table-form comment above: p=2 must not touch 0x5f00.
+        return Ok(vec![]);
+    }
     if p == 1 {
         st.memory.ram[mem::ADDR_SCREEN_PAL as usize + c0 as usize] = c1;
     } else {
@@ -1416,7 +1435,9 @@ fn api_palt(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     if a.len() <= 1 || matches!(a.get(1), Some(Value::Nil)) {
         let bits = arg_int(&a, 0).unwrap_or(0) as u32;
         for k in 0..16 {
-            if bits & (1 << k) != 0 {
+            // Confirmed against official PICO-8: bit (15-k) controls color
+            // k (bit 0 = color 15 ... bit 15 = color 0), not bit k directly.
+            if bits & (1 << (15 - k)) != 0 {
                 st.memory.ram[mem::ADDR_DRAW_PAL as usize + k] |= 0x10;
             } else {
                 st.memory.ram[mem::ADDR_DRAW_PAL as usize + k] &= 0x0F;

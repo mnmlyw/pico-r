@@ -28,6 +28,8 @@ pub const ADDR_CAMERA_X: u16 = 0x5F28;
 pub const ADDR_CAMERA_Y: u16 = 0x5F2A;
 pub const ADDR_DEVKIT: u16 = 0x5F2D;
 pub const ADDR_FILL_PAT: u16 = 0x5F31;
+pub const ADDR_LINE_X: u16 = 0x5F3C; // last line() endpoint, 16-bit
+pub const ADDR_LINE_Y: u16 = 0x5F3E;
 
 pub const ADDR_INPUT_P0: u16 = 0x5F4C;
 pub const ADDR_INPUT_P1: u16 = 0x5F4D;

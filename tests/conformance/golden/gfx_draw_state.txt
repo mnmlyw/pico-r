@@ -1,0 +1,7 @@
+RESULT palt_c0 16
+RESULT palt_c15 15
+RESULT line_x 50
+RESULT line_y 60
+RESULT pal_p2_draw_unchanged 5
+RESULT pal_table_oob 5
+DONE
