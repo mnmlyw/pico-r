@@ -1,0 +1,6 @@
+RESULT has_pcall [nil]
+RESULT has_error [nil]
+RESULT has_string [nil]
+RESULT has_assert [function]
+RESULT has_setmetatable [function]
+DONE

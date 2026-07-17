@@ -131,8 +131,6 @@ pub fn register_all(globals: &Rc<Table>) {
     set("rawset", lua_rawset);
     set("rawequal", lua_rawequal);
     set("rawlen", lua_rawlen);
-    set("error", lua_error);
-    set("pcall", lua_pcall);
     set("assert", lua_assert);
 
     // === Math ===
@@ -241,30 +239,6 @@ pub fn register_all(globals: &Rc<Table>) {
     set("flip", api_flip);
     set("reset", api_reset);
     set("stop", api_stop);
-
-    drop(g);
-
-    // Install a `string` library table for s:sub() etc. style usage
-    let strtab = Rc::new(RefCell::new(TableInner::new()));
-    {
-        let mut s = strtab.borrow_mut();
-        let make =
-            |name: &'static str, f: fn(&mut Interp, Vec<Value>) -> Result<Vec<Value>, RtError>| {
-                Value::Function(Function::Native(Rc::new(NativeFn {
-                    name,
-                    func: Box::new(f),
-                })))
-            };
-        s.set(str_v(b"sub"), make("sub", api_sub));
-        s.set(str_v(b"len"), make("len", str_len));
-        s.set(str_v(b"lower"), make("lower", str_lower));
-        s.set(str_v(b"upper"), make("upper", str_upper));
-        s.set(str_v(b"rep"), make("rep", str_rep));
-        s.set(str_v(b"format"), make("format", str_format));
-    }
-    globals
-        .borrow_mut()
-        .set(str_v(b"string"), Value::Table(strtab));
 }
 
 // === stdlib bodies ===
@@ -464,26 +438,6 @@ fn lua_rawlen(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> 
         Some(Value::Str(s)) => Ok(vec![num(s.len() as f64)]),
         Some(Value::Table(t)) => Ok(vec![num(t.borrow().raw_len() as f64)]),
         _ => Err(RtError::msg("rawlen: needs table or string")),
-    }
-}
-
-fn lua_error(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let v = args.into_iter().next().unwrap_or(Value::Nil);
-    Err(RtError { value: v })
-}
-
-fn lua_pcall(i: &mut Interp, mut args: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    if args.is_empty() {
-        return Err(RtError::msg("pcall: missing function"));
-    }
-    let f = args.remove(0);
-    match i.call_value(&f, args) {
-        Ok(mut vs) => {
-            let mut out = vec![boolv(true)];
-            out.append(&mut vs);
-            Ok(out)
-        }
-        Err(e) => Ok(vec![boolv(false), e.value]),
     }
 }
 
@@ -900,75 +854,6 @@ fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     };
     t.borrow_mut().set(num(idx as f64), v);
     Ok(vec![Value::Table(t)])
-}
-
-fn str_len(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let s = arg_str(&a, 0).unwrap_or_else(|| Rc::from(&[][..]));
-    Ok(vec![num(s.len() as f64)])
-}
-fn str_lower(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let s = arg_str(&a, 0).unwrap_or_else(|| Rc::from(&[][..]));
-    let r: Vec<u8> = s.iter().map(|&c| c.to_ascii_lowercase()).collect();
-    Ok(vec![Value::Str(Rc::from(r.as_slice()))])
-}
-fn str_upper(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let s = arg_str(&a, 0).unwrap_or_else(|| Rc::from(&[][..]));
-    let r: Vec<u8> = s.iter().map(|&c| c.to_ascii_uppercase()).collect();
-    Ok(vec![Value::Str(Rc::from(r.as_slice()))])
-}
-fn str_rep(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let s = arg_str(&a, 0).unwrap_or_else(|| Rc::from(&[][..]));
-    let n = opt_int(&a, 1, 0).max(0) as usize;
-    let mut r = Vec::with_capacity(s.len() * n);
-    for _ in 0..n {
-        r.extend_from_slice(&s);
-    }
-    Ok(vec![Value::Str(Rc::from(r.as_slice()))])
-}
-fn str_format(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    // Minimal %d, %s, %f, %x, %% support
-    let fmt = arg_str(&a, 0).unwrap_or_else(|| Rc::from(&[][..]));
-    let mut out = Vec::new();
-    let mut argi = 1usize;
-    let mut i = 0;
-    while i < fmt.len() {
-        let c = fmt[i];
-        if c == b'%' && i + 1 < fmt.len() {
-            i += 1;
-            match fmt[i] {
-                b'%' => out.push(b'%'),
-                b'd' => {
-                    let n = arg_num(&a, argi).unwrap_or(0.0) as i64;
-                    out.extend_from_slice(format!("{}", n).as_bytes());
-                    argi += 1;
-                }
-                b's' => {
-                    let s = a
-                        .get(argi)
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_else(|| Rc::from(&[][..]));
-                    out.extend_from_slice(&s);
-                    argi += 1;
-                }
-                b'f' => {
-                    let n = arg_num(&a, argi).unwrap_or(0.0);
-                    out.extend_from_slice(format!("{}", n).as_bytes());
-                    argi += 1;
-                }
-                b'x' => {
-                    let n = arg_num(&a, argi).unwrap_or(0.0) as i64;
-                    out.extend_from_slice(format!("{:x}", n).as_bytes());
-                    argi += 1;
-                }
-                _ => out.push(c),
-            }
-            i += 1;
-        } else {
-            out.push(c);
-            i += 1;
-        }
-    }
-    Ok(vec![Value::Str(Rc::from(out.as_slice()))])
 }
 
 // === Table ===

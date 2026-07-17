@@ -418,7 +418,9 @@ impl Interp {
                 Ok(Value::Nil)
             }
             Value::Str(s) => {
-                // Support s[i] character indexing via PICO-8 convention
+                // Support s[i] character indexing via PICO-8 convention --
+                // confirmed against official PICO-8 that this is real
+                // behavior, unlike string methods/library (see below).
                 if let Value::Number(n) = k {
                     let idx = *n as i64;
                     if idx >= 1 && idx <= s.len() as i64 {
@@ -426,12 +428,9 @@ impl Interp {
                     }
                     return Ok(Value::Nil);
                 }
-                // String library lookup via globals.string
-                let strlib_key = Value::Str(Rc::from(b"string".as_slice()));
-                let strlib = self.globals.borrow().get(&strlib_key);
-                if let Value::Table(_) = &strlib {
-                    return self.table_get(&strlib, k);
-                }
+                // No string library/methods in official PICO-8 at all --
+                // confirmed via oracle (`("hi"):upper()` crashes on real
+                // hardware). Other non-numeric keys on a string just miss.
                 Ok(Value::Nil)
             }
             _ => Err(RtError::msg(format!(
@@ -492,6 +491,13 @@ impl Interp {
             Expr::MethodCall(obj, name, args) => {
                 let o = self.eval_expr_single(obj)?;
                 let f = self.table_get(&o, &Value::Str(Rc::from(name.as_bytes())))?;
+                if !matches!(f, Value::Function(_) | Value::Table(_)) {
+                    return Err(RtError::msg(format!(
+                        "attempt to call method '{}' (a {} value)",
+                        name,
+                        f.type_name()
+                    )));
+                }
                 let mut argvals = vec![o];
                 argvals.extend(self.eval_exp_list_multi(args)?);
                 self.call_value(&f, argvals)
