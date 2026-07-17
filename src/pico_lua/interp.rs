@@ -617,12 +617,12 @@ impl Interp {
                 }))
             }
             Concat => {
-                let sa = a
-                    .as_str()
-                    .ok_or_else(|| RtError::msg(format!("concat {}", a.type_name())))?;
-                let sb = b
-                    .as_str()
-                    .ok_or_else(|| RtError::msg(format!("concat {}", b.type_name())))?;
+                let sa = a.as_str().ok_or_else(|| {
+                    RtError::msg(format!("attempt to concatenate a {} value", a.type_name()))
+                })?;
+                let sb = b.as_str().ok_or_else(|| {
+                    RtError::msg(format!("attempt to concatenate a {} value", b.type_name()))
+                })?;
                 let mut out = Vec::with_capacity(sa.len() + sb.len());
                 out.extend_from_slice(&sa);
                 out.extend_from_slice(&sb);

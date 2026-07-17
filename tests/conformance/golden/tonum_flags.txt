@@ -1,0 +1,8 @@
+RESULT hex_flag 142
+RESULT hex_flag_prefixed 142
+RESULT plain 1.5
+RESULT type_fail nil
+RESULT type_fail_flag4 number val=0
+RESULT raw_flag_str 1
+RESULT raw_flag_num 0
+DONE

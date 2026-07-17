@@ -705,9 +705,55 @@ fn api_tostr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 
 fn api_tonum(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = a.first().cloned().unwrap_or(Value::Nil);
+    let flags = arg_int(&a, 1).unwrap_or(0);
+    // Confirmed against official PICO-8: 0x4 returns 0 instead of nil on a
+    // parse failure.
+    let fail = |flags: i32| if flags & 0x4 != 0 { num(0.0) } else { nil() };
+
+    if flags & 0x1 != 0 {
+        // Hex parse: optional "0x"/"0X" prefix, optional "." fractional
+        // part (the inverse of tostr's 0x1 hex format).
+        let Some(s) = v.as_str() else {
+            return Ok(vec![fail(flags)]);
+        };
+        let s = String::from_utf8_lossy(&s);
+        let s = s
+            .strip_prefix("0x")
+            .or_else(|| s.strip_prefix("0X"))
+            .unwrap_or(&s);
+        let (int_part, frac_part) = match s.split_once('.') {
+            Some((i, f)) => (i, Some(f)),
+            None => (s, None),
+        };
+        if int_part.is_empty() && frac_part.is_none_or(|f| f.is_empty()) {
+            return Ok(vec![fail(flags)]);
+        }
+        let hi = i64::from_str_radix(int_part, 16).unwrap_or(0);
+        let lo = match frac_part {
+            Some(f) if !f.is_empty() => i64::from_str_radix(f, 16)
+                .map(|v| v as f64 / 16f64.powi(f.len() as i32))
+                .unwrap_or(0.0),
+            _ => 0.0,
+        };
+        return Ok(vec![num(hi as f64 + lo)]);
+    }
+
+    if flags & 0x2 != 0 {
+        // Raw fixed-point reinterpretation (the inverse of tostr's 0x2):
+        // a string is parsed as a plain integer raw bit pattern; a number
+        // uses its own to_fixed() representation (which naturally wraps
+        // for out-of-16.16-range values).
+        let raw = match &v {
+            Value::Str(s) => String::from_utf8_lossy(s).parse::<i64>().unwrap_or(0) as i32,
+            Value::Number(n) => to_fixed(*n),
+            _ => return Ok(vec![fail(flags)]),
+        };
+        return Ok(vec![num(from_fixed(raw))]);
+    }
+
     Ok(vec![match v.as_number() {
         Some(n) => num(n),
-        None => nil(),
+        None => fail(flags),
     }])
 }
 
@@ -738,10 +784,11 @@ fn api_chr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let mut out = Vec::with_capacity(a.len());
     for v in &a {
         if let Some(n) = v.as_number() {
-            let n = n as i32;
-            if (0..=255).contains(&n) {
-                out.push(n as u8);
-            }
+            // Confirmed against official PICO-8: out-of-range ordinals wrap
+            // via `% 256` rather than being dropped (chr(256,300,-1) -> the
+            // 3-byte string [0, 44, 255]).
+            let n = (n as i32).rem_euclid(256);
+            out.push(n as u8);
         }
     }
     Ok(vec![Value::Str(Rc::from(out.as_slice()))])
