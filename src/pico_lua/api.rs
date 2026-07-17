@@ -653,9 +653,8 @@ fn api_rotr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 
 // === String ===
 
-fn api_tostr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let v = a.first().cloned().unwrap_or(Value::Nil);
-    let s = match &v {
+fn display_string(v: &Value) -> String {
+    match v {
         Value::Nil => "[nil]".to_string(),
         Value::Bool(b) => {
             if *b {
@@ -665,11 +664,18 @@ fn api_tostr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
             }
         }
         Value::Number(n) => number_to_str(*n),
-        Value::Str(b) => return Ok(vec![Value::Str(Rc::clone(b))]),
+        Value::Str(b) => String::from_utf8_lossy(b).into_owned(),
         Value::Table(_) => "[table]".to_string(),
         Value::Function(_) => "[function]".to_string(),
-    };
-    Ok(vec![str_v(s.as_bytes())])
+    }
+}
+
+fn api_tostr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    let v = a.first().cloned().unwrap_or(Value::Nil);
+    if let Value::Str(b) = &v {
+        return Ok(vec![Value::Str(Rc::clone(b))]);
+    }
+    Ok(vec![str_v(display_string(&v).as_bytes())])
 }
 
 fn api_tonum(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -1733,7 +1739,12 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_time(i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![num(i.host().elapsed_time)])
 }
-fn api_printh(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+fn api_printh(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let v = a.first().cloned().unwrap_or(Value::Nil);
+        println!("{}", display_string(&v));
+    }
     Ok(vec![])
 }
 fn api_cartdata(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {

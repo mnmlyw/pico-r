@@ -1,0 +1,11 @@
+RESULT caret_w len=2 bytes=6 119 
+RESULT caret_t len=2 bytes=6 116 
+RESULT caret_bang6 len=8 bytes=6 33 49 50 51 52 53 54 
+RESULT hash_0 len=2 bytes=2 48 
+RESULT hash_1 len=2 bytes=2 49 
+RESULT dash len=2 bytes=3 53 
+RESULT plus len=2 bytes=5 53 
+RESULT star len=3 bytes=1 51 97 
+RESULT pipe len=1 bytes=4 
+RESULT caret_colon len=18 bytes=6 58 48 49 50 51 52 53 54 55 56 57 97 98 99 100 101 102 
+DONE

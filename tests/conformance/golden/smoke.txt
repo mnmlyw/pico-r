@@ -1,0 +1,4 @@
+RESULT flr_neg -4
+RESULT shl_ovf 0
+RESULT screen_hash 29992
+DONE

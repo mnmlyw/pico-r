@@ -228,22 +228,18 @@ fn process_line(
     in_long_string: &mut bool,
     long_string_level: &mut usize,
 ) {
-    let trimmed_start = line
-        .iter()
-        .position(|&b| b != b' ' && b != b'\t')
-        .unwrap_or(line.len());
-    let trimmed = &line[trimmed_start..];
-
-    if !trimmed.is_empty() && trimmed[0] == b'?' {
-        out.extend_from_slice(&line[..trimmed_start]);
-        out.extend_from_slice(b"print(");
-        out.extend_from_slice(&trimmed[1..]);
-        out.push(b')');
-        return;
-    }
-
     let mut i = 0;
     let mut in_string: u8 = 0;
+    // `?` is PICO-8's print() shorthand. It's valid wherever a statement can
+    // start — not just at the start of a line; size-golfed carts glue it
+    // directly after `end`/`then`/`)` etc with no separator — and, confirmed
+    // against official PICO-8, its argument list always runs to the end of
+    // the physical line (comments excepted, since those are stripped
+    // lexically regardless of context). Anything else meant to follow on
+    // the same line — `end`, `;`, more statements — gets swallowed too and
+    // fails to compile in official PICO-8 as well; carts relying on that
+    // are simply broken there too, not a pico-r gap.
+    let mut print_shorthand_active = false;
 
     while i < line.len() {
         let ch = line[i];
@@ -266,7 +262,14 @@ fn process_line(
                 i += 1;
                 if i < line.len() {
                     let next = line[i];
-                    if is_valid_lua52_escape(next) {
+                    if let Some(escape) = p8scii_control_escape(next) {
+                        // PICO-8 control-code shorthand: `\^`,`\#`,`\-`,`\|`,`\+`
+                        // each collapse to a single P8SCII control byte; the
+                        // following character is NOT consumed as a parameter —
+                        // it stays as ordinary string content, interpreted at
+                        // draw_text() time (see gfx.rs's 0x01-0x06 handling).
+                        out.extend_from_slice(escape);
+                    } else if is_valid_lua52_escape(next) {
                         out.push(b'\\');
                         out.push(next);
                     } else {
@@ -283,6 +286,18 @@ fn process_line(
                 in_string = 0;
             }
             out.push(ch);
+            i += 1;
+            continue;
+        }
+
+        if print_shorthand_active && ch == b'-' && i + 1 < line.len() && line[i + 1] == b'-' {
+            out.push(b')');
+            print_shorthand_active = false;
+        }
+
+        if ch == b'?' {
+            out.extend_from_slice(b"print(");
+            print_shorthand_active = true;
             i += 1;
             continue;
         }
@@ -484,6 +499,10 @@ fn process_line(
         out.push(ch);
         i += 1;
     }
+
+    if print_shorthand_active {
+        out.push(b')');
+    }
 }
 
 fn is_prev_value(line: &[u8], pos: usize) -> bool {
@@ -543,6 +562,22 @@ fn p8scii_button_id(ch: u8) -> Option<&'static [u8]> {
         0x91 => b"1",
         0x94 => b"2",
         0x97 => b"4",
+        _ => return None,
+    })
+}
+
+// PICO-8 P8SCII control-code escape shorthand, confirmed against official
+// PICO-8 (`ord(sub(s,i,i))` on each escaped string): `\X` collapses to a
+// single control byte, emitted here as a zero-padded `\NNN` decimal escape
+// so the real Lua lexer decodes it back to that one byte.
+fn p8scii_control_escape(ch: u8) -> Option<&'static [u8]> {
+    Some(match ch {
+        b'*' => b"\\001",
+        b'#' => b"\\002",
+        b'-' => b"\\003",
+        b'|' => b"\\004",
+        b'+' => b"\\005",
+        b'^' => b"\\006",
         _ => return None,
     })
 }
@@ -829,7 +864,7 @@ fn extract_lhs(out: &[u8]) -> LhsResult<'_> {
     let mut start = end;
     while start > 0 {
         let ch = out[start - 1];
-        if ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'.' || ch == b']' || ch == b'[' {
+        if ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'.' {
             start -= 1;
         } else if ch == b')' {
             let mut depth: i32 = 1;
@@ -841,6 +876,46 @@ fn extract_lhs(out: &[u8]) -> LhsResult<'_> {
                 }
                 if out[start] == b'(' {
                     depth -= 1;
+                }
+            }
+        } else if ch == b']' {
+            // Depth-tracked, unlike the old unconditional-match: a bare `[`
+            // (no matching `]` yet) means we're INSIDE an open subscript's
+            // index expression, and must stop there, not walk back through
+            // it into the array name (`tq[o\64+1]` — lhs is `o`, not `tq[o`).
+            let mut depth: i32 = 1;
+            start -= 1;
+            while start > 0 && depth > 0 {
+                start -= 1;
+                if out[start] == b']' {
+                    depth += 1;
+                }
+                if out[start] == b'[' {
+                    depth -= 1;
+                }
+            }
+        } else if ch == b'}' {
+            let mut depth: i32 = 1;
+            start -= 1;
+            while start > 0 && depth > 0 {
+                start -= 1;
+                if out[start] == b'}' {
+                    depth += 1;
+                }
+                if out[start] == b'{' {
+                    depth -= 1;
+                }
+            }
+        } else if ch == b'"' || ch == b'\'' {
+            // Lua's string-call sugar: `f"str"` / `f'str'` (no parens). Scan
+            // back to the matching opening quote so the callee name (e.g.
+            // `rnd` in `rnd"32"\1`) is still reachable on the next iteration.
+            let quote = ch;
+            start -= 1;
+            while start > 0 {
+                start -= 1;
+                if out[start] == quote && (start == 0 || out[start - 1] != b'\\') {
+                    break;
                 }
             }
         } else {
@@ -889,6 +964,11 @@ fn extract_rhs(line: &[u8], start: usize) -> RhsResult<'_> {
             continue;
         }
         if ch == b'-' && i + 1 < line.len() && line[i + 1] == b'-' {
+            break;
+        }
+        // `?` is never valid inside an expression -- it always starts a new
+        // print-shorthand statement, so it's a hard stop like `;`.
+        if depth == 0 && ch == b'?' {
             break;
         }
         if ch == b'(' || ch == b'[' {
@@ -1024,6 +1104,11 @@ fn extract_simple_expr(line: &[u8], start: usize) -> ExprResult<'_> {
             i += 1;
             continue;
         }
+        // `?` is never valid inside an expression -- it always starts a new
+        // print-shorthand statement, so it's a hard stop like `;`.
+        if depth == 0 && ch == b'?' {
+            break;
+        }
         if ch == b'(' || ch == b'[' {
             depth += 1;
             i += 1;
@@ -1098,6 +1183,11 @@ fn extract_bitwise_rhs(line: &[u8], start: usize) -> ExprResult<'_> {
             in_str = ch;
             i += 1;
             continue;
+        }
+        // `?` is never valid inside an expression -- it always starts a new
+        // print-shorthand statement, so it's a hard stop like `;`.
+        if depth == 0 && ch == b'?' {
+            break;
         }
         if ch == b'(' || ch == b'[' {
             depth += 1;
