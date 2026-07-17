@@ -587,8 +587,31 @@ impl Interp {
                     Add => x + y,
                     Sub => x - y,
                     Mul => x * y,
-                    Div => x / y,
-                    Mod => x - y * (x / y).floor(),
+                    Div => {
+                        // PICO-8's 16.16 fixed point has no infinity/NaN;
+                        // division by zero saturates to the max/min
+                        // representable fixed value instead (confirmed
+                        // against official PICO-8: 1/0 == 0x7fff.ffff).
+                        if y == 0.0 {
+                            const MAX_FIXED: f64 = 2147483647.0 / 65536.0;
+                            if x < 0.0 {
+                                -MAX_FIXED
+                            } else {
+                                MAX_FIXED
+                            }
+                        } else {
+                            x / y
+                        }
+                    }
+                    // Confirmed against official PICO-8: x % 0 == 0 always
+                    // (not derived from the saturated division above).
+                    Mod => {
+                        if y == 0.0 {
+                            0.0
+                        } else {
+                            x - y * (x / y).floor()
+                        }
+                    }
                     Pow => x.powf(y),
                     _ => unreachable!(),
                 }))

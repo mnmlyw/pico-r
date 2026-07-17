@@ -1,0 +1,15 @@
+RESULT half 0.5
+RESULT tenth 0.1
+RESULT neg_tenth -0.1
+RESULT hundredth 0.01
+RESULT big_frac 100.5
+RESULT tiny 0
+RESULT neg_tiny 0
+RESULT one 1
+RESULT neg_one -1
+RESULT one_point_five 1.5
+RESULT max_val 32768
+RESULT near_int 3
+RESULT quarter 0.25
+RESULT one_third 0.3333
+DONE

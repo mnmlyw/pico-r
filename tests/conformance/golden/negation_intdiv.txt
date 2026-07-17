@@ -1,0 +1,5 @@
+RESULT neg_intdiv -3
+RESULT neg_intdiv2 -4
+RESULT neg_var_intdiv -3
+RESULT neg_intdiv_zero -32768
+DONE

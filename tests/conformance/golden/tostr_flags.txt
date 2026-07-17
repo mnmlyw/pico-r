@@ -1,0 +1,12 @@
+RESULT hex_pos 0x0001.8000
+RESULT hex_neg 0xfffe.8000
+RESULT hex_zero 0x0000.0000
+RESULT raw_pos 65536
+RESULT raw_neg -65536
+RESULT raw_frac 98304
+RESULT combined 0x00018000
+RESULT no_args_len 0
+RESULT nil_val [nil]
+RESULT bool_true true
+RESULT bool_false false
+DONE

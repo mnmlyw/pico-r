@@ -671,7 +671,32 @@ fn display_string(v: &Value) -> String {
 }
 
 fn api_tostr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let v = a.first().cloned().unwrap_or(Value::Nil);
+    // tostr() with truly no arguments is "" -- distinct from tostr(nil),
+    // which is "[nil]" (confirmed against official PICO-8).
+    if a.is_empty() {
+        return Ok(vec![str_v(b"")]);
+    }
+    let v = a[0].clone();
+    let flags = arg_int(&a, 1).unwrap_or(0);
+    if flags != 0 {
+        // Format flags only apply to numbers; confirmed against official
+        // PICO-8: 0x1 = hex "0xHHHH.LLLL", 0x2 = raw 32-bit fixed value as a
+        // plain decimal integer, 0x3 = hex digits with no "." separator.
+        if let Value::Number(n) = v {
+            let raw = to_fixed(n);
+            let hex = flags & 0x1 != 0;
+            let raw_dec = flags & 0x2 != 0;
+            if hex && raw_dec {
+                return Ok(vec![str_v(format!("0x{:08x}", raw as u32).as_bytes())]);
+            } else if hex {
+                let hi = (raw as u32) >> 16;
+                let lo = (raw as u32) & 0xffff;
+                return Ok(vec![str_v(format!("0x{:04x}.{:04x}", hi, lo).as_bytes())]);
+            } else if raw_dec {
+                return Ok(vec![str_v(format!("{}", raw).as_bytes())]);
+            }
+        }
+    }
     if let Value::Str(b) = &v {
         return Ok(vec![Value::Str(Rc::clone(b))]);
     }

@@ -170,12 +170,22 @@ pub fn number_to_str(n: f64) -> String {
         return if n > 0.0 { "inf".into() } else { "-inf".into() };
     }
     if n == n.trunc() && n.abs() < 1e16 {
-        format!("{}", n as i64)
-    } else {
-        // Lua uses %.14g; emulate with Rust default float formatting roughly.
-        let s = format!("{}", n);
-        s
+        return format!("{}", n as i64);
     }
+    // PICO-8 numbers are 16.16 fixed point, displayed rounded to 4 decimal
+    // digits with trailing zeros stripped (confirmed against official
+    // PICO-8: e.g. 1/3 -> "0.3333", 2.99998 -> "3").
+    let mut s = format!("{:.4}", n);
+    while s.ends_with('0') {
+        s.pop();
+    }
+    if s.ends_with('.') {
+        s.pop();
+    }
+    if s == "-0" {
+        s = "0".to_string();
+    }
+    s
 }
 
 /// Hashable key derived from a Value.

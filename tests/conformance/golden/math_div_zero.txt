@@ -1,0 +1,9 @@
+RESULT div_pos_zero 32768
+RESULT div_neg_zero -32768
+RESULT div_zero_zero 32768
+RESULT intdiv_pos_zero 32767
+RESULT intdiv_neg_zero -32768
+RESULT mod_pos_zero 0
+RESULT mod_neg_zero 0
+RESULT div_eq_max true
+DONE

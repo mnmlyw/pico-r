@@ -918,6 +918,13 @@ fn extract_lhs(out: &[u8]) -> LhsResult<'_> {
                     break;
                 }
             }
+        } else if ch == b'-' && !is_prev_value(out, start - 1) {
+            // Leading unary minus (e.g. `-a\b`), distinguished from binary
+            // subtraction (`a-b\c`, where the `\`'s lhs is just `b`) by
+            // checking what precedes it. Without this, `-5\0` rewrote as
+            // `-flr(5/(0))` instead of `flr(-5/(0))` -- the sign ended up
+            // outside the call instead of inside the operand.
+            start -= 1;
         } else {
             break;
         }
