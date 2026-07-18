@@ -1,0 +1,7 @@
+RESULT poke4_over_pos -31072
+RESULT poke4_over_neg 31072
+RESULT poke4_max_ok 32768
+RESULT poke4_huge 0
+RESULT dget_over_pos -31072
+RESULT dget_over_neg 31072
+DONE

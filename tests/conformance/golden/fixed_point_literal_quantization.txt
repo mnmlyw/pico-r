@@ -1,0 +1,12 @@
+RESULT smallest_pos 0
+RESULT below_half_incr 0
+RESULT tiny_neg 0
+RESULT tiny_pos 0
+RESULT near_incr_boundary_lo 1
+RESULT near_incr_boundary_hi 1
+RESULT round_trip_check 1
+RESULT round_up_candidate 1
+RESULT hex_frac 0
+RESULT hex_frac_half_incr 0
+RESULT hex_max 32768
+DONE

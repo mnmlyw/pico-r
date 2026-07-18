@@ -1,0 +1,5 @@
+RESULT lit_0_1 0x0000.1999
+RESULT above_half_tick 0x0000.0001
+RESULT div_1_6 0x0000.2aaa
+RESULT neg_div_1_6 0xffff.d556
+DONE

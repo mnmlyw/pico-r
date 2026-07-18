@@ -1,0 +1,5 @@
+RESULT last_i 99.9908
+RESULT iter_count 1001
+RESULT last_k 9.9998
+RESULT iter_count2 31
+DONE

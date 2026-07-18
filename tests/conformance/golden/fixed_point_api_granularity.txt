@@ -1,0 +1,5 @@
+RESULT sqrt2 1.4142
+RESULT sqrt2_hex 0x0001.6a09
+RESULT sqrt3 1.732
+RESULT sqrt_frac 0.7071
+DONE

@@ -306,6 +306,15 @@ impl Interp {
                         Flow::Break => break,
                         other => return Ok(other),
                     }
+                    // Deliberately NOT quantized/wrapped, unlike a regular
+                    // `+`. Oracle-confirmed (fixed_point_for_loop_boundary.p8):
+                    // a loop counter that overflows past the fixed-point
+                    // range (e.g. 32767+1) must terminate via the plain,
+                    // unwrapped comparison below -- wrapping it here would
+                    // send i to -32768, which is not > stop, and the loop
+                    // would run forever instead of ending. start/stop/step
+                    // are already on-grid (from eval_expr_single), so this
+                    // stays exact for any in-range accumulation regardless.
                     i += step;
                 }
                 Ok(Flow::Normal)
@@ -641,7 +650,11 @@ impl Interp {
                 let y = b
                     .as_number()
                     .ok_or_else(|| RtError::msg(format!("arith on {}", b.type_name())))?;
-                Ok(Value::Number(match op {
+                // Every result is re-quantized to the 16.16 fixed-point grid
+                // (confirmed via oracle, tests/conformance/probes/fixed_point_*.p8):
+                // this is where overflow wraparound comes from (e.g.
+                // 32767.5+1 -> -32767.5, 20000*2 -> -25536).
+                Ok(Value::Number(quantize(match op {
                     Add => x + y,
                     Sub => x - y,
                     Mul => x * y,
@@ -672,7 +685,7 @@ impl Interp {
                     }
                     Pow => x.powf(y),
                     _ => unreachable!(),
-                }))
+                })))
             }
             Concat => {
                 let sa = a.as_str().ok_or_else(|| {
@@ -726,7 +739,9 @@ impl Interp {
                 let n = v
                     .as_number()
                     .ok_or_else(|| RtError::msg("negate non-number"))?;
-                Ok(Value::Number(-n))
+                // Quantized so that negating the minimum representable value
+                // wraps to itself, matching official PICO-8: -(-32768) == -32768.
+                Ok(Value::Number(quantize(-n)))
             }
             UnOp::Not => Ok(Value::Bool(!v.truthy())),
             UnOp::Len => match v {

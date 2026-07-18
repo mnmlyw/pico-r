@@ -90,21 +90,6 @@ fn arg_addr(args: &[Value], i: usize) -> u16 {
     safe_to_i32(f.floor()) as u16
 }
 
-fn to_fixed(v: f64) -> i32 {
-    let scaled = v * 65536.0;
-    if scaled.is_nan() {
-        return 0;
-    }
-    if scaled > i32::MAX as f64 || scaled < i32::MIN as f64 {
-        let wide = scaled as i64;
-        return wide as i32;
-    }
-    scaled as i32
-}
-fn from_fixed(v: i32) -> f64 {
-    v as f64 / 65536.0
-}
-
 // === Color helper for gfx ===
 
 fn get_color(state: &mut PicoState, args: &[Value], i: usize) -> u8 {
@@ -197,6 +182,7 @@ pub fn register_all(globals: &Rc<Table>) {
     set("pset", api_pset);
     set("pget", api_pget);
     set("line", api_line);
+    set("tline", api_tline);
     set("rect", api_rect);
     set("rectfill", api_rectfill);
     set("circ", api_circ);
@@ -235,6 +221,7 @@ pub fn register_all(globals: &Rc<Table>) {
     set("memcpy", api_memcpy);
     set("memset", api_memset);
     set("reload", api_reload);
+    set("load", api_load);
     set("cstore", api_cstore);
 
     // === Audio ===
@@ -483,15 +470,15 @@ fn api_ceil(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 fn api_sqrt(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
-    Ok(vec![num(if v >= 0.0 { v.sqrt() } else { 0.0 })])
+    Ok(vec![num(quantize(if v >= 0.0 { v.sqrt() } else { 0.0 }))])
 }
 fn api_sin(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
-    Ok(vec![num(-(v * std::f64::consts::TAU).sin())])
+    Ok(vec![num(quantize(-(v * std::f64::consts::TAU).sin()))])
 }
 fn api_cos(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
-    Ok(vec![num((v * std::f64::consts::TAU).cos())])
+    Ok(vec![num(quantize((v * std::f64::consts::TAU).cos()))])
 }
 fn api_atan2(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let dx = arg_num(&a, 0).unwrap_or(0.0);
@@ -505,7 +492,7 @@ fn api_atan2(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     if t < 0.0 {
         t += 1.0;
     }
-    Ok(vec![num(t)])
+    Ok(vec![num(quantize(t))])
 }
 fn api_max(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let mut r = arg_num(&a, 0).unwrap_or(0.0);
@@ -539,7 +526,7 @@ fn api_rnd(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     }
     let max = arg_num(&a, 0).unwrap_or(1.0);
     let r = xorshift(i) as f64 / 4294967296.0;
-    Ok(vec![num(r * max)])
+    Ok(vec![num(quantize(r * max))])
 }
 fn api_srand(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
@@ -706,7 +693,7 @@ fn api_tonum(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
                 .unwrap_or(0.0),
             _ => 0.0,
         };
-        return Ok(vec![num(hi as f64 + lo)]);
+        return Ok(vec![num(quantize(hi as f64 + lo))]);
     }
 
     if flags & 0x2 != 0 {
@@ -1581,21 +1568,14 @@ fn api_poke2(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_peek4(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let addr = arg_addr(&a, 0);
     let raw = i.host().memory.peek32(addr);
-    let fixed = raw as i32;
-    Ok(vec![num(fixed as f64 / 65536.0)])
+    Ok(vec![num(from_fixed(raw as i32))])
 }
 fn api_poke4(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let addr = arg_addr(&a, 0);
     let v = arg_num(&a, 1).unwrap_or(0.0);
-    let scaled = v * 65536.0;
-    let fixed = if scaled >= i32::MAX as f64 {
-        i32::MAX
-    } else if scaled <= i32::MIN as f64 {
-        i32::MIN
-    } else {
-        scaled as i32
-    };
-    i.host().memory.poke32(addr, fixed as u32);
+    // Wraps (not clamps) on overflow, confirmed against official PICO-8:
+    // poke4(0,100000) round-trips through peek4 as -31072, not i32::MAX.
+    i.host().memory.poke32(addr, to_fixed(v) as u32);
     Ok(vec![])
 }
 fn api_memcpy(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -1791,8 +1771,7 @@ fn api_dget(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     }
     let addr = mem::ADDR_CART_DATA + (idx as u16) * 4;
     let raw = i.host().memory.peek32(addr);
-    let fixed = raw as i32;
-    Ok(vec![num(fixed as f64 / 65536.0)])
+    Ok(vec![num(from_fixed(raw as i32))])
 }
 fn api_dset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let idx = arg_int(&a, 0).unwrap_or(0);
@@ -1801,21 +1780,37 @@ fn api_dset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         return Ok(vec![]);
     }
     let addr = mem::ADDR_CART_DATA + (idx as u16) * 4;
-    let scaled = v * 65536.0;
-    let fixed = if scaled >= i32::MAX as f64 {
-        i32::MAX
-    } else if scaled <= i32::MIN as f64 {
-        i32::MIN
-    } else {
-        scaled as i32
-    };
-    i.host().memory.poke32(addr, fixed as u32);
+    // Wraps (not clamps) on overflow, same as poke4 -- confirmed via oracle.
+    i.host().memory.poke32(addr, to_fixed(v) as u32);
     Ok(vec![])
 }
 fn api_menuitem(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![])
 }
 fn api_extcmd(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    Ok(vec![])
+}
+// `load(filename,[breadcrumb],[param_str])` loads and starts running a
+// *different* cart -- a multi-cart "warp" mechanism. Confirmed real via
+// oracle (calling it with a nonexistent cart name doesn't error; execution
+// just continues past it). This engine only ever loads one cart per
+// invocation and has no concept of switching carts at runtime, so this is
+// stubbed as a no-op -- confirmed real-world impact unblocking a crash on
+// several corpus carts (dontdig-1.p8.png, solitomb-2.p8.png, and others
+// that call it during _init before any coroutine-dependent code runs).
+fn api_load(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    Ok(vec![])
+}
+// `tline(x0,y0,x1,y1,mx,my,[mdx,mdy],[layers])` draws a textured line,
+// sampling colors from the map/sprite region as it steps -- confirmed a
+// real API function via oracle (doesn't error), but stubbed as a no-op:
+// getting its raster algorithm (exact per-pixel step count, coordinate
+// space across PICO-8 versions, the optional `layers` mask) right needs
+// careful oracle verification against real sprite/map data this session's
+// probe carts don't have. Unblocks a real corpus cart from crashing
+// (tomorrow-6.p8.png) at the cost of not drawing anything -- same
+// no-crash-first tradeoff as the other host-integration stubs below.
+fn api_tline(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![])
 }
 // `_set_fps(n)` overrides the target frame rate to an arbitrary value

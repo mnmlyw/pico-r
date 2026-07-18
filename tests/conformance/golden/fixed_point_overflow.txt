@@ -1,0 +1,9 @@
+RESULT add_over_top -32767.5
+RESULT add_over_top2 -32768
+RESULT mul_wrap -25536
+RESULT mul_wrap_neg 25536
+RESULT neg_min -32768
+RESULT sub_under_bottom 32767
+RESULT big_mul 16960
+RESULT max_lit_plus_eps 32768
+DONE

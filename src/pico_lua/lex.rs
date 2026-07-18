@@ -549,7 +549,9 @@ impl<'a> Lexer<'a> {
         } else {
             s.parse::<f64>().map_err(|_| self.err("bad number"))?
         };
-        Ok(Tok::Number(n))
+        // Quantize to the 16.16 fixed-point grid: real PICO-8 truncates
+        // literals at parse time (confirmed via oracle, see value::quantize).
+        Ok(Tok::Number(super::value::quantize(n)))
     }
 
     fn read_identifier(&mut self) -> Result<Tok, LexError> {
