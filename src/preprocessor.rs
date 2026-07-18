@@ -296,6 +296,17 @@ fn process_line(
         }
 
         if ch == b'?' {
+            // Size-golfed carts glue `?` directly after a keyword like
+            // `then`/`else`/`do` with no separator (`then?"x"`). Since both
+            // sides are identifier characters, splicing in `print(` verbatim
+            // would fuse them into a single token (`thenprint`) for the real
+            // Lua lexer -- insert a space when the preceding byte demands it.
+            if out
+                .last()
+                .is_some_and(|&b| b.is_ascii_alphanumeric() || b == b'_')
+            {
+                out.push(b' ');
+            }
             out.extend_from_slice(b"print(");
             print_shorthand_active = true;
             i += 1;

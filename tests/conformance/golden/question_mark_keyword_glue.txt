@@ -1,0 +1,3 @@
+RESULT then_glue ok
+RESULT do_glue ok
+DONE

@@ -20,6 +20,11 @@ name = "dump-pp"
 path = "tools/dump_pp.rs"
 required-features = []
 
+[[bin]]
+name = "dump-raw"
+path = "tools/dump_raw.rs"
+required-features = []
+
 [profile.release]
 opt-level = 3
 lto = true
