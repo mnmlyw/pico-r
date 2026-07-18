@@ -46,7 +46,7 @@ fn run_main() {
     let flip_limit_hit = |msg: &str| msg.contains(pico_r::pico_lua::api::FLIP_LIMIT_MARKER);
 
     let mut lua = LuaImpl::new();
-    lua.set_recursion_limit(30_000);
+    lua.set_recursion_limit(150_000);
     if let Err(e) = lua.load_cart(&mut state, &cart) {
         if flip_limit_hit(&e) {
             eprintln!("ok, explicit-flip main loop ran {} frames clean", n_frames);

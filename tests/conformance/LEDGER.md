@@ -434,3 +434,13 @@ Peeled another layer off samurise's parens8 VM via a shrinking-differential camp
 - The Lua call-depth cap is now a host-settable `recursion_limit` (default 1000), and run-cart executes on a 1GB-stack worker thread with the cap at 30k — deeply recursive embedded compilers need real depth. | `src/pico_lua/interp.rs`, `src/pico_lua/mod.rs`, `tools/run_cart.rs`
 
 Corpus re-sweep: **183/188 clean** (unchanged) — **zero regressions**. samurise's VM now compiles further still but hits runaway recursion inside its compile stage ("out of memory" even at 30k frames — some remaining semantic divergence turns its compile into unbounded recursion; each differential probe so far has confirmed the VM machinery piece by piece).
+
+### Follow-up: pushing toward 100% clean — count() on non-tables; samurise clean (round 38)
+
+The final layer of the samurise onion, located by extracting its ROM-embedded LISP stdlib from the cart PNG, bisecting it form-by-form on a mini-boot cart, and minimizing the failing form to a two-token repro:
+
+- **`count()` on a non-table returns NO values (like `tostr()` with no args), not 0 — fixed, byte-exact against the oracle.** 0 is truthy in Lua, and samurise's LISP VM dispatches key-value vs positional table entries with `(when (count elem) kv-branch positional-branch)` — our truthy 0 sent every positional ATOM down the kv branch, whose `(rawget elem 2)` on a string produced the unbounded compile recursion behind the "out of memory". Minimal repro: `(table 8 5 6)`. | `src/pico_lua/api.rs` (`api_count`)
+
+**`samurise-1.p8.png` now runs its full frame budget clean** — the end of a five-layer dig across rounds 35-38, each layer a real, probe-locked conformance fix: glyph aliasing → all()-over-strings → object keys through next() → recursion-limit hosting → count() arity. Corpus re-sweep: **184/188 clean** (up from 183) — **zero regressions**.
+
+**Remaining 4:** `basicshmupdc1-0` (broken identically on official — conformant-by-matching-error; effective score 185/188), `bytebeat_tweet-0` (paces on real-time audio drain; no headless analogue), `praxis_fighter_x-2` + `redash-7` (cart-embedded decompressors requiring exact 16.16 fixed-point overflow semantics — the epic in progress in the parallel session).

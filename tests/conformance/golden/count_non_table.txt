@@ -1,0 +1,6 @@
+RESULT count_str 
+RESULT count_str2 
+RESULT count_tbl 2
+RESULT count_empty 0
+RESULT count_nil 
+DONE

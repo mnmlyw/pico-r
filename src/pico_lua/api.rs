@@ -1037,7 +1037,12 @@ fn api_deli(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_count(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let t = match args.first() {
         Some(Value::Table(t)) => t.clone(),
-        _ => return Ok(vec![num(0.0)]),
+        // NO value for non-tables, not 0 -- 0 is truthy in Lua, and carts
+        // use `count(x)` as an is-this-a-list test (samurise's LISP VM
+        // dispatches key-value vs positional table entries on it).
+        // Oracle: `tostr(count("8"))` prints "" -- i.e. count returns
+        // ZERO values there, exactly like tostr() with no args.
+        _ => return Ok(vec![]),
     };
     if let Some(target) = args.get(1) {
         if !matches!(target, Value::Nil) {
