@@ -1053,6 +1053,19 @@ fn extract_lhs(out: &[u8]) -> LhsResult<'_> {
         }
         if ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'.' {
             start -= 1;
+        } else if (ch == b')' || ch == b']' || ch == b'"' || ch == b'\'')
+            && start < end
+            && (out[start].is_ascii_alphanumeric() || out[start] == b'_')
+        {
+            // A closing delimiter directly abutting the identifier we've
+            // already captured (no `.`/`[`/`(` connector) is value
+            // JUXTAPOSITION -- two separate golfed-together statements --
+            // not a call/index chain. Walking through it splices the prior
+            // statement into this LHS: `e.y-=rnd"18"e.a+=rnd"6"` expanded
+            // the first statement to `... - (rnd"18")` and then `e.a+=`'s
+            // LHS scan walked back through `)` grabbing `rnd"18")e.a`.
+            // Confirmed on a real corpus cart (praxis_fighter_x-2.p8.png).
+            break;
         } else if ch == b')' {
             let mut depth: i32 = 1;
             start -= 1;
@@ -1222,6 +1235,18 @@ fn extract_rhs(line: &[u8], start: usize) -> RhsResult<'_> {
             }
         }
         if depth == 0 && ch == b'=' && i > rhs_start {
+            // `==` is a comparison, not the start of a glued-on assignment
+            // statement -- skip the whole operator. The backward `prev`
+            // check below only recognizes `==` when scanning its SECOND
+            // char; the FIRST char (preceded by an ordinary identifier)
+            // otherwise looks exactly like `x=...`, so an and/or ternary
+            // chain with a second comparison (`a=="w"and-1or a=="e"and 1`)
+            // got mis-split at the second `==`. Confirmed on a real corpus
+            // cart (puzzlesofthepaladin-3.p8.png).
+            if i + 1 < line.len() && line[i + 1] == b'=' {
+                i += 2;
+                continue;
+            }
             let prev = line[i - 1];
             if prev == b'=' || prev == b'~' || prev == b'<' || prev == b'>' || prev == b'!' {
                 i += 1;

@@ -1,0 +1,3 @@
+RESULT ternary_two_comparisons -1
+RESULT juxtaposed_compounds 10 3
+DONE
