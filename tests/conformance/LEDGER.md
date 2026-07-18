@@ -359,3 +359,9 @@ Corpus re-sweep: **177/188 clean** (up from 172 — five carts in one deletion) 
 - **Unary minus now dispatches to `__unm` for non-number operands, joining the arithmetic metamethods implemented earlier.** 3D-math carts overload it on vectors (`-v` in mot_pool-23.p8.png's matrix library). Oracle-verified (`probes/metamethod_unm.p8`). | `src/pico_lua/interp.rs` (`eval_unop`)
 
 Corpus re-sweep: **178/188 clean** (up from 177) — **zero regressions**. One full clean fix (`mot_pool-23.p8.png`). Remaining 10: `basicshmupdc1-0` (broken on official too — conformant-by-matching-error), `bytebeat_tweet-0`/`samurise-1`/`terra_1cart-42`/`driftmania-5` (TIMEOUT: stat(108)-drain loop, parens8 embedded LISP VM — likely raw interpreter throughput), `fakogejuzo-0` (DRAW_ERROR), `picodex_dual-1`/`praxis_fighter_x-2`/`redash-7`/`super_world_of_goo-6` (deep runtime divergence inside cart-embedded decompressors — the deferred exact-16.16-fixed-point epic, in progress in a parallel session).
+
+### Follow-up: pushing toward 100% clean — `#`/unpack border semantics (round 29)
+
+- **`#` (and `unpack()`, which uses it) now follows Lua's luaH_getn border search instead of stopping at the first nil hole.** Oracle-confirmed across five table shapes: `#{1,2,nil,4,5}` is 5 (holes spanned), sparse `u[1] u[2] u[4] u[5]` is 5, a lone `u[1000]=1` is 0, `{1,2,3}` plus `w[1000]=1` is 3, and `z[3]=1` alone is 0. The old first-hole scan silently truncated any `unpack()` destructuring of containers with nil fields (`local cx,cy,w,h,pad,... = unpack(self)` — fakogejuzo-0.p8.png, which still fails on a separate nil elsewhere but now destructures correctly). Implemented as the same doubling-probe + binary-search border find real Lua uses. | `src/pico_lua/value.rs` (`raw_len`)
+
+Corpus re-sweep: **178/188 clean** (unchanged) — **zero regressions**; `driftmania-5.p8.png` progressed from TIMEOUT to UPDATE_ERROR.

@@ -80,21 +80,37 @@ impl TableInner {
         }
     }
     pub fn raw_len(&self) -> i64 {
-        // Lua spec: # of a table is *some* boundary n such that t[n]~=nil and t[n+1]==nil.
-        // For sequence-shaped tables this is the conventional length.
-        // We do a simple linear search up from 1.
-        let mut n: i64 = 0;
-        loop {
-            let k = Key::Int(n + 1);
-            if !self.map.contains_key(&k) {
-                return n;
+        // Official PICO-8's `#` (and unpack(), which uses it) follows
+        // Lua's luaH_getn border search, which SPANS interior nil holes:
+        // `#{1,2,nil,4,5}` is 5, sparse `u[1] u[2] u[4] u[5]` is 5, but a
+        // lone `u[1000]=1` is 0 and `{1,2,3}` plus `w[1000]=1` is 3 (all
+        // five shapes oracle-confirmed; a real corpus cart destructures
+        // containers holding nil fields via `unpack(self)`,
+        // fakogejuzo-0.p8.png). Doubling probe then binary search for a
+        // border t[i]~=nil, t[i+1]==nil.
+        let has = |i: i64| self.map.contains_key(&Key::Int(i));
+        if !has(1) {
+            return 0;
+        }
+        let mut i: i64 = 1;
+        let mut j: i64 = 2;
+        while has(j) {
+            i = j;
+            if j > i64::MAX / 2 {
+                break;
             }
-            n += 1;
-            if n > self.array_max_hint as i64 + 1 && n > 1024 {
-                // Defensive cap to avoid runaway scans
-                return n;
+            j *= 2;
+        }
+        // Border in (i, j]: t[i] ~= nil, t[j] == nil.
+        while j - i > 1 {
+            let m = (i + j) / 2;
+            if has(m) {
+                i = m;
+            } else {
+                j = m;
             }
         }
+        i
     }
 }
 

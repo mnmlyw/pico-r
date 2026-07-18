@@ -1,0 +1,7 @@
+RESULT len 5
+RESULT unpack 1 2 [nil] 4 5
+RESULT sparse_len 5
+RESULT big_key_only 0
+RESULT seq_plus_big 3
+RESULT hole_start 0
+DONE
