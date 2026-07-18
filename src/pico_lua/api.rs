@@ -1342,6 +1342,21 @@ fn api_print(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         let col = get_color(st, &a, 3);
         (x, y, col)
     };
+    // P8SCII `\^1`..`\^9` are frame-pause control codes -- golfed carts
+    // replace their whole flip() with `?"\^1\^c"` (pause a frame + clear;
+    // lv-2.p8.png). Count each as a frame tick so a headless host's flip
+    // budget (see api_flip) also ends explicit print-pause main loops.
+    let mut k = 0;
+    while k + 1 < txt.len() {
+        if txt[k] == 0x06 && txt[k + 1].is_ascii_digit() && txt[k + 1] != b'0' {
+            st.flip_count += 1;
+            st.frame_count += 1;
+            if st.flip_limit != 0 && st.flip_count > st.flip_limit {
+                return Err(RtError::msg(FLIP_LIMIT_MARKER));
+            }
+        }
+        k += 1;
+    }
     let r = gfx::draw_text(&mut st.memory, &txt, x, y, col);
     // Confirmed against official PICO-8: print() always persists the
     // cursor registers afterward, regardless of which argument form was
@@ -1516,6 +1531,7 @@ fn api_fillp(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 
 fn api_btn(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let st = i.host();
+    note_btn_poll(st)?;
     if a.is_empty() || matches!(a[0], Value::Nil) {
         let p0 = (st.input.btn_state[0] & 0x3F) as u32;
         let p1 = ((st.input.btn_state[1] & 0x3F) as u32) << 8;
@@ -1531,8 +1547,32 @@ fn api_btn(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     }
     Ok(vec![boolv(st.input.btn(b, p_raw as u8))])
 }
+/// Input-wait busy loops (`while(not btn(4))do print(...)end`,
+/// onek_landscape06-0.p8.png) poll btn()/btnp() without ever flipping --
+/// official PICO-8 keeps servicing frames during such loops, so they
+/// terminate on real hardware. Headlessly, count sustained polling as
+/// synthetic frame ticks so the flip budget (see api_flip) ends the loop
+/// as "ran N frames" instead of hanging forever. Inactive (flip_limit==0)
+/// on interactive/WASM hosts.
+fn note_btn_poll(st: &mut crate::state::PicoState) -> Result<(), RtError> {
+    if st.flip_limit == 0 {
+        return Ok(());
+    }
+    st.btn_poll_count += 1;
+    if st.btn_poll_count >= 64 {
+        st.btn_poll_count = 0;
+        st.flip_count += 1;
+        st.frame_count += 1;
+        if st.flip_count > st.flip_limit {
+            return Err(RtError::msg(FLIP_LIMIT_MARKER));
+        }
+    }
+    Ok(())
+}
+
 fn api_btnp(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let st = i.host();
+    note_btn_poll(st)?;
     if a.is_empty() || matches!(a[0], Value::Nil) {
         let mut p0: u32 = 0;
         let mut p1: u32 = 0;
@@ -1867,7 +1907,21 @@ fn api_set_fps(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_serial(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![])
 }
-fn api_flip(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+/// Marker message for a flip() call past the host's frame budget --
+/// headless hosts (run-cart) treat an error carrying this message as
+/// "explicit-flip main loop ran its N frames clean", not a cart crash.
+/// Old-style carts run their entire game as `::_:: ... flip() goto _`
+/// at top level and would otherwise hang a headless run forever.
+pub const FLIP_LIMIT_MARKER: &str = "__picor_flip_limit__";
+
+fn api_flip(i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    let st = i.host();
+    st.flip_count += 1;
+    st.frame_count += 1;
+    st.elapsed_time += 1.0 / st.target_fps as f64;
+    if st.flip_limit != 0 && st.flip_count > st.flip_limit {
+        return Err(RtError::msg(FLIP_LIMIT_MARKER));
+    }
     Ok(vec![])
 }
 fn api_reset(i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {

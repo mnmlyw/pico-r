@@ -17,13 +17,25 @@ fn main() {
     let cart = cart::load_bytes(&data, &mut state.memory).expect("load cart");
     state.memory.save_rom();
     state.prepare_for_cart_load();
+    // Old-style carts run their whole game as an explicit `flip()`+goto
+    // main loop at top level instead of defining _update/_draw -- give
+    // them a frame budget so they count as "ran N frames" instead of
+    // hanging a headless run forever. Generous slack over n_frames so
+    // legitimate init-time flips (loading screens) never trip it.
+    state.flip_limit = n_frames + 60;
 
     eprintln!("cart loaded; lua source {} bytes", cart.lua_code.len());
     let processed = preprocessor::preprocess(&cart.lua_code);
     eprintln!("preprocessed {} bytes", processed.len());
 
+    let flip_limit_hit = |msg: &str| msg.contains(pico_r::pico_lua::api::FLIP_LIMIT_MARKER);
+
     let mut lua = LuaImpl::new();
     if let Err(e) = lua.load_cart(&mut state, &cart) {
+        if flip_limit_hit(&e) {
+            eprintln!("ok, explicit-flip main loop ran {} frames clean", n_frames);
+            report_and_exit(&mut state);
+        }
         eprintln!("LOAD ERROR: {}", e);
         // Dump the relevant part of preprocessed source for context
         eprintln!("---- preprocessed (head) ----");
@@ -35,14 +47,24 @@ fn main() {
     eprintln!("loaded; calling _init");
     lua.call_init(&mut state);
     if lua.had_error() {
-        eprintln!("INIT ERROR: {}", lua.error_message());
+        let msg = lua.error_message();
+        if flip_limit_hit(msg) {
+            eprintln!("ok, explicit-flip main loop ran {} frames clean", n_frames);
+            report_and_exit(&mut state);
+        }
+        eprintln!("INIT ERROR: {}", msg);
         std::process::exit(3);
     }
     eprintln!("running {} frames", n_frames);
     for f in 0..n_frames {
-        // Simulate pressing X (buttons[5]=0x20) for the first 8 frames to advance past title
+        // Simulate button presses to advance past title screens: X
+        // (buttons[5]=0x20) for the first 8 frames, then O
+        // (buttons[4]=0x10) for the next 8 -- carts vary in which button
+        // their "press to start" waits for.
         if f < 8 {
             state.input.btn_state[0] = 0x20;
+        } else if f < 16 {
+            state.input.btn_state[0] = 0x10;
         } else {
             state.input.btn_state[0] = 0;
         }
@@ -50,12 +72,22 @@ fn main() {
         state.memory.ram[0x5F4C] = state.input.btn_state[0];
         lua.call_update(&mut state);
         if lua.had_error() {
-            eprintln!("UPDATE ERROR (frame {}): {}", f, lua.error_message());
+            let msg = lua.error_message();
+            if flip_limit_hit(msg) {
+                eprintln!("ok, explicit-flip main loop ran {} frames clean", n_frames);
+                report_and_exit(&mut state);
+            }
+            eprintln!("UPDATE ERROR (frame {}): {}", f, msg);
             std::process::exit(4);
         }
         lua.call_draw(&mut state);
         if lua.had_error() {
-            eprintln!("DRAW ERROR (frame {}): {}", f, lua.error_message());
+            let msg = lua.error_message();
+            if flip_limit_hit(msg) {
+                eprintln!("ok, explicit-flip main loop ran {} frames clean", n_frames);
+                report_and_exit(&mut state);
+            }
+            eprintln!("DRAW ERROR (frame {}): {}", f, msg);
             std::process::exit(5);
         }
         state.frame_count += 1;
@@ -63,6 +95,11 @@ fn main() {
         state.elapsed_time += 1.0 / state.target_fps as f64;
     }
     eprintln!("ok, ran {} frames clean", n_frames);
+    report_and_exit(&mut state);
+}
+
+/// Print the screen/audio summary and exit 0 (the "cart ran clean" path).
+fn report_and_exit(state: &mut PicoState) -> ! {
     // Sample the screen — count nonzero pixels in last frame
     let screen = &state.memory.ram[0x6000..0x8000];
     let nonzero = screen.iter().filter(|&&b| b != 0).count();
@@ -94,4 +131,5 @@ fn main() {
             .collect::<Vec<_>>()
             .join(" | ")
     );
+    std::process::exit(0);
 }
