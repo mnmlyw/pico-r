@@ -771,10 +771,18 @@ impl Interp {
         let v = self.eval_expr_single(e)?;
         match op {
             UnOp::Neg => {
-                let n = v
-                    .as_number()
-                    .ok_or_else(|| RtError::msg("negate non-number"))?;
-                Ok(Value::Number(-n))
+                if let Some(n) = v.as_number() {
+                    return Ok(Value::Number(-n));
+                }
+                // `__unm` metamethod -- vector/matrix carts overload unary
+                // minus alongside the arithmetic metamethods
+                // (mot_pool-23.p8.png's 3D math library).
+                if let Some(mm) = Self::metamethod(&v, b"__unm") {
+                    return self
+                        .call_value(&mm, vec![v.clone(), v])
+                        .map(|mut r| r.drain(..).next().unwrap_or(Value::Nil));
+                }
+                Err(RtError::msg("negate non-number"))
             }
             UnOp::Not => Ok(Value::Bool(!v.truthy())),
             UnOp::Len => match v {
