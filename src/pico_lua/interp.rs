@@ -43,6 +43,14 @@ pub struct Interp {
     pub instruction_budget: u32,
     /// Most recent line number visited by the interpreter — used to annotate errors.
     pub current_line: u32,
+    /// Stack of coroutines currently being resumed (innermost last) —
+    /// yield targets the last entry. See `coroutine.rs`.
+    pub coroutine_current: Vec<Rc<super::coroutine::CoroutineHandle>>,
+    /// Each resumer's stashed frame stack, restored on yield/return.
+    pub coroutine_resume_ctx: Vec<Vec<Frame>>,
+    /// Registry mapping a coroutine's Lua-visible handle table (by Rc
+    /// pointer identity) to its thread handle.
+    pub coroutines: std::collections::HashMap<usize, Rc<super::coroutine::CoroutineHandle>>,
 }
 
 pub struct Frame {
@@ -62,6 +70,9 @@ impl Interp {
             chunkname: "cart".into(),
             instruction_budget: 0,
             current_line: 0,
+            coroutine_current: Vec::new(),
+            coroutine_resume_ctx: Vec::new(),
+            coroutines: std::collections::HashMap::new(),
         }
     }
 

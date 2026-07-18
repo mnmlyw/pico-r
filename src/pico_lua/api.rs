@@ -251,6 +251,10 @@ pub fn register_all(globals: &Rc<Table>) {
     set("cartdata", api_cartdata);
     set("dget", api_dget);
     set("dset", api_dset);
+    set("cocreate", api_cocreate);
+    set("coresume", api_coresume);
+    set("costatus", api_costatus);
+    set("yield", api_yield);
     set("menuitem", api_menuitem);
     set("extcmd", api_extcmd);
     set("flip", api_flip);
@@ -1861,6 +1865,66 @@ fn api_dset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     i.host().memory.poke32(addr, fixed as u32);
     Ok(vec![])
 }
+// === Coroutines (see coroutine.rs for the threading model) ===
+// The Lua-visible coroutine value is an empty table whose Rc identity
+// keys a registry in the interpreter. (Official reports type "thread";
+// this shim reports "table" -- carts observably relying on that
+// distinction haven't been seen in the corpus.)
+
+fn co_lookup(
+    i: &Interp,
+    v: Option<&Value>,
+) -> Option<Rc<crate::pico_lua::coroutine::CoroutineHandle>> {
+    if let Some(Value::Table(t)) = v {
+        return i.coroutines.get(&(Rc::as_ptr(t) as usize)).cloned();
+    }
+    None
+}
+
+fn api_cocreate(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    let f = a.first().cloned().unwrap_or(Value::Nil);
+    if !matches!(f, Value::Function(_)) {
+        return Err(RtError::msg("cocreate: argument must be a function"));
+    }
+    let handle = crate::pico_lua::coroutine::cocreate(i, f).map_err(RtError::msg)?;
+    let t = Rc::new(RefCell::new(TableInner::new()));
+    i.coroutines.insert(Rc::as_ptr(&t) as usize, handle);
+    Ok(vec![Value::Table(t)])
+}
+
+fn api_coresume(i: &mut Interp, mut a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    let Some(co) = co_lookup(i, a.first()) else {
+        return Ok(vec![boolv(false), str_v(b"cannot resume non-coroutine")]);
+    };
+    let args: Vec<Value> = if a.is_empty() {
+        Vec::new()
+    } else {
+        a.drain(1..).collect()
+    };
+    match crate::pico_lua::coroutine::coresume(i, &co, args) {
+        Ok(vals) => {
+            let mut out = vec![boolv(true)];
+            out.extend(vals);
+            Ok(out)
+        }
+        Err(msg) => Ok(vec![boolv(false), str_v(msg.as_bytes())]),
+    }
+}
+
+fn api_costatus(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    use crate::pico_lua::coroutine::CoStatus;
+    let s = match co_lookup(i, a.first()).map(|c| c.status.get()) {
+        Some(CoStatus::Suspended) => b"suspended".as_slice(),
+        Some(CoStatus::Running) => b"running".as_slice(),
+        Some(CoStatus::Dead) | None => b"dead".as_slice(),
+    };
+    Ok(vec![str_v(s)])
+}
+
+fn api_yield(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    crate::pico_lua::coroutine::coyield(i, a).map_err(RtError::msg)
+}
+
 fn api_menuitem(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![])
 }

@@ -12,6 +12,7 @@
 
 pub mod api;
 pub mod ast;
+pub mod coroutine;
 pub mod interp;
 pub mod lex;
 pub mod parse;

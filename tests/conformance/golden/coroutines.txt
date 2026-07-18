@@ -1,0 +1,11 @@
+RESULT status1 suspended
+RESULT in_co 3 4
+RESULT first true 7
+RESULT resumed_with 5 6
+RESULT second true 30
+RESULT status2 suspended
+RESULT third true 99
+RESULT status3 dead
+RESULT dead false corolib: cannot resume dead coroutine
+RESULT errco false
+DONE
