@@ -425,3 +425,12 @@ Corpus re-sweep: **183/188 clean** (unchanged) — **zero regressions**; `samuri
 - Top-level (load-stage) runtime errors now carry `cart:<line>` like the lifecycle-stage errors. | `src/pico_lua/mod.rs`
 
 Corpus re-sweep: **183/188 clean** (unchanged) — **zero regressions**. samurise now fails deterministically (`cart:141: attempt to index a nil value (key 2)`) inside its VM's compile stage — still open, but debuggable now.
+
+### Follow-up: pushing toward 100% clean — object keys round-trip through next() (round 37)
+
+Peeled another layer off samurise's parens8 VM via a shrinking-differential campaign (probe carts embedding the VM's real boot chunks, bisected against the oracle):
+
+- **`next()`/`pairs()` now round-trip table- and function-valued KEYS — the old `Key` registry stored only a raw pointer, so iteration returned nil for object keys and ENDED EARLY, silently truncating any table keyed by objects.** samurise's VM keys its per-closure upvalue sets by sentinel TABLES and copies them with `for e in next,n do t[e]=d[1][e] end` — the truncation broke its captured-environment chains, producing the deterministic `(key 2)` failure. `Key::Table`/`Key::Function` now hold the real `Rc`/`Function` (hash/eq still by identity), and `key_to_value` reconstructs them. Oracle-verified (`probes/next_object_keys.p8`). | `src/pico_lua/value.rs`, `src/pico_lua/api.rs`
+- The Lua call-depth cap is now a host-settable `recursion_limit` (default 1000), and run-cart executes on a 1GB-stack worker thread with the cap at 30k — deeply recursive embedded compilers need real depth. | `src/pico_lua/interp.rs`, `src/pico_lua/mod.rs`, `tools/run_cart.rs`
+
+Corpus re-sweep: **183/188 clean** (unchanged) — **zero regressions**. samurise's VM now compiles further still but hits runaway recursion inside its compile stage ("out of memory" even at 30k frames — some remaining semantic divergence turns its compile into unbounded recursion; each differential probe so far has confirmed the VM machinery piece by piece).

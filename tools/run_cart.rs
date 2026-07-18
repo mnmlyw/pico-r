@@ -4,6 +4,21 @@
 use pico_r::{cart, lua_engine::LuaEngine, pico_lua::LuaImpl, preprocessor, state::PicoState};
 
 fn main() {
+    // The tree-walking interpreter spends native stack per Lua call
+    // level; deeply recursive carts (embedded compilers/VMs) need far
+    // more than the default main-thread stack. Run everything on a
+    // big-stack worker so the Lua recursion cap can sit high.
+    let child = std::thread::Builder::new()
+        .stack_size(1024 * 1024 * 1024)
+        .spawn(run_main)
+        .expect("spawn worker");
+    match child.join() {
+        Ok(()) => {}
+        Err(_) => std::process::exit(134),
+    }
+}
+
+fn run_main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("usage: run-cart <cart> [n_frames]");
@@ -31,6 +46,7 @@ fn main() {
     let flip_limit_hit = |msg: &str| msg.contains(pico_r::pico_lua::api::FLIP_LIMIT_MARKER);
 
     let mut lua = LuaImpl::new();
+    lua.set_recursion_limit(30_000);
     if let Err(e) = lua.load_cart(&mut state, &cart) {
         if flip_limit_hit(&e) {
             eprintln!("ok, explicit-flip main loop ran {} frames clean", n_frames);

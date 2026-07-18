@@ -51,6 +51,11 @@ pub struct Interp {
     /// Registry mapping a coroutine's Lua-visible handle table (by Rc
     /// pointer identity) to its thread handle.
     pub coroutines: std::collections::HashMap<usize, Rc<super::coroutine::CoroutineHandle>>,
+    /// Lua call-depth cap; exceeding it raises official's "out of memory".
+    /// Hosts with a large native stack (run-cart spawns a big-stack
+    /// thread) may raise it -- deeply recursive carts like samurise's
+    /// parens8 compiler need thousands of frames legitimately.
+    pub recursion_limit: usize,
 }
 
 pub struct Frame {
@@ -73,6 +78,7 @@ impl Interp {
             coroutine_current: Vec::new(),
             coroutine_resume_ctx: Vec::new(),
             coroutines: std::collections::HashMap::new(),
+            recursion_limit: 1000,
         }
     }
 
@@ -906,7 +912,7 @@ impl Interp {
         // level consumes native stack in this tree-walking interpreter and
         // deep recursion aborts the whole host process with a fatal stack
         // overflow (SIGABRT) instead of a cart error.
-        if self.frames.len() >= 1000 {
+        if self.frames.len() >= self.recursion_limit {
             return Err(RtError::msg("out of memory"));
         }
         let body = Rc::clone(&c.body);

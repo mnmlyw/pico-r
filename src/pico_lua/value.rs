@@ -342,14 +342,33 @@ pub fn number_to_str(n: f64) -> String {
 }
 
 /// Hashable key derived from a Value.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Key {
     Bool(bool),
     Int(i64),
     Float(u64), // f64 bits, normalized for NaN
     Str(Rc<[u8]>),
-    Table(usize), // Rc::as_ptr() as usize
-    Function(usize),
+    // Hold the actual Rc (hash/eq by pointer identity) so a table- or
+    // function-valued key can be reconstructed by next()/pairs() -- the
+    // old raw-usize form made such keys irrecoverable, so iteration
+    // returned nil for them and ENDED EARLY, silently truncating any
+    // table that used object keys (samurise-1.p8.png's LISP VM keys its
+    // upvalue sets by sentinel tables).
+    Table(Rc<Table>),
+    Function(Function),
+}
+
+impl fmt::Debug for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Key::Bool(b) => write!(f, "Bool({})", b),
+            Key::Int(i) => write!(f, "Int({})", i),
+            Key::Float(b) => write!(f, "Float({})", f64::from_bits(*b)),
+            Key::Str(s) => write!(f, "Str({:?})", String::from_utf8_lossy(s)),
+            Key::Table(t) => write!(f, "Table(0x{:x})", Rc::as_ptr(t) as usize),
+            Key::Function(g) => write!(f, "Function(0x{:x})", g.identity()),
+        }
+    }
 }
 
 impl PartialEq for Key {
@@ -363,8 +382,8 @@ impl PartialEq for Key {
                 f == *a as f64 && f.fract() == 0.0
             }
             (Key::Str(a), Key::Str(b)) => a == b,
-            (Key::Table(a), Key::Table(b)) => a == b,
-            (Key::Function(a), Key::Function(b)) => a == b,
+            (Key::Table(a), Key::Table(b)) => Rc::ptr_eq(a, b),
+            (Key::Function(a), Key::Function(b)) => a.identity_eq(b),
             _ => false,
         }
     }
@@ -397,11 +416,13 @@ impl std::hash::Hash for Key {
                 3u8.hash(state);
                 s.hash(state);
             }
-            Key::Table(p) => {
+            Key::Table(t) => {
+                let p = &(Rc::as_ptr(t) as usize);
                 4u8.hash(state);
                 p.hash(state);
             }
-            Key::Function(p) => {
+            Key::Function(f) => {
+                let p = &f.identity();
                 5u8.hash(state);
                 p.hash(state);
             }
@@ -425,8 +446,8 @@ impl Key {
                 }
             }
             Value::Str(s) => Some(Key::Str(Rc::clone(s))),
-            Value::Table(t) => Some(Key::Table(Rc::as_ptr(t) as usize)),
-            Value::Function(f) => Some(Key::Function(f.identity())),
+            Value::Table(t) => Some(Key::Table(Rc::clone(t))),
+            Value::Function(f) => Some(Key::Function(f.clone())),
         }
     }
 }

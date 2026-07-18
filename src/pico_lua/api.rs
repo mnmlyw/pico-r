@@ -399,7 +399,8 @@ fn key_to_value(k: &Key) -> Value {
         Key::Int(i) => Value::Number(*i as f64),
         Key::Float(b) => Value::Number(f64::from_bits(*b)),
         Key::Str(s) => Value::Str(Rc::clone(s)),
-        Key::Table(_) | Key::Function(_) => Value::Nil, // not preserved in this impl
+        Key::Table(t) => Value::Table(Rc::clone(t)),
+        Key::Function(f) => Value::Function(f.clone()),
     }
 }
 

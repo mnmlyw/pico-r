@@ -119,6 +119,15 @@ fn format_err(e: &RtError) -> String {
     }
 }
 
+impl LuaImpl {
+    /// Raise the Lua call-depth cap (see `Interp::recursion_limit`) --
+    /// only safe when the calling thread has a correspondingly large
+    /// native stack.
+    pub fn set_recursion_limit(&mut self, n: usize) {
+        self.interp.recursion_limit = n;
+    }
+}
+
 impl LuaEngine for LuaImpl {
     fn load_cart(&mut self, state: &mut PicoState, cart: &Cart) -> Result<(), String> {
         // Preprocess PICO-8 source to standard Lua 5.2
