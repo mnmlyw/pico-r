@@ -356,7 +356,11 @@ impl<'a> Lexer<'a> {
             }
             b'"' | b'\'' => self.read_short_string(c),
             b'0'..=b'9' => self.read_number(),
-            b'_' | b'a'..=b'z' | b'A'..=b'Z' => self.read_identifier(),
+            // High bytes are P8SCII glyphs -- identifier characters in
+            // PICO-8 (a glyph variable's real name IS that raw byte, so
+            // `t={\x8b=1}` and `t["\x8b"]` refer to the same key,
+            // matching official).
+            b'_' | b'a'..=b'z' | b'A'..=b'Z' | 0x80..=0xFF => self.read_identifier(),
             _ => Err(self.err_byte("unexpected character", c)),
         }
     }
@@ -556,7 +560,7 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
         while self.pos < self.src.len() {
             let c = self.src[self.pos];
-            if c == b'_' || c.is_ascii_alphanumeric() {
+            if c == b'_' || c.is_ascii_alphanumeric() || c >= 0x80 {
                 self.pos += 1;
             } else {
                 break;
@@ -587,7 +591,16 @@ impl<'a> Lexer<'a> {
             b"until" => Tok::Until,
             b"while" => Tok::While,
             _ => {
-                let s = std::str::from_utf8(bytes).map_err(|_| self.err("non-utf8 identifier"))?;
+                // Glyph identifiers contain raw high bytes (not valid
+                // UTF-8). The name must carry the EXACT bytes: a glyph
+                // variable's table key has to match a raw-byte string
+                // literal of the same glyph (`t={<glyph>=1}` ==
+                // `t["<glyph>"]` on official hardware). Names are only
+                // ever compared, hashed, and converted via as_bytes()
+                // downstream -- never sliced at char boundaries -- so the
+                // relaxed encoding is confined to display paths (error
+                // messages), where the worst case is a replacement glyph.
+                let s = unsafe { std::str::from_utf8_unchecked(bytes) };
                 Tok::Name(Rc::from(s))
             }
         })

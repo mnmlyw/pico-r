@@ -28,7 +28,7 @@ fn main() {
             std::process::exit(3);
         }
     };
-    if let Err(e) = std::fs::write(output, cart.lua_code.as_bytes()) {
+    if let Err(e) = std::fs::write(output, &cart.lua_code) {
         eprintln!("write {}: {}", output, e);
         std::process::exit(4);
     }

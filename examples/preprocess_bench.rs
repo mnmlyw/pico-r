@@ -10,7 +10,7 @@ fn run(name: &str, src: &str, iters: u32) {
     let mut total_bytes: u128 = 0;
     for _ in 0..iters {
         let t = Instant::now();
-        let out = pico_r::preprocessor::preprocess(src);
+        let out = pico_r::preprocessor::preprocess(src.as_bytes());
         total_ns += t.elapsed().as_nanos();
         total_bytes += out.len() as u128;
     }

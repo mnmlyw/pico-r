@@ -125,7 +125,7 @@ impl LuaEngine for LuaImpl {
         let processed = preprocessor::preprocess(&cart.lua_code);
 
         // Tokenize + parse
-        let bytes = processed.as_bytes();
+        let bytes = &processed[..];
         let mut lex = lex::Lexer::new(bytes);
         let toks = lex
             .tokenize()

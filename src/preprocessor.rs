@@ -1,7 +1,7 @@
 // PICO-8 Lua dialect → standard Lua 5.2 preprocessor.
 // Faithful port of preprocessor.zig.
 
-pub fn preprocess(source: &str) -> String {
+pub fn preprocess(source: &[u8]) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::with_capacity(source.len());
     let mut in_long_comment = false;
     let mut long_comment_level: usize = 0;
@@ -10,7 +10,7 @@ pub fn preprocess(source: &str) -> String {
     let mut pending_print = false;
 
     let mut first_line = true;
-    for raw_line in source.as_bytes().split(|&b| b == b'\n') {
+    for raw_line in source.split(|&b| b == b'\n') {
         if !first_line {
             out.push(b'\n');
         }
@@ -66,8 +66,7 @@ pub fn preprocess(source: &str) -> String {
         );
     }
 
-    let final_bytes = insert_number_spaces(&out);
-    String::from_utf8_lossy(&final_bytes).into_owned()
+    insert_number_spaces(&out)
 }
 
 fn preprocess_and_process_line(
@@ -377,17 +376,38 @@ fn process_line(
         }
 
         if ch >= 0x80 {
-            if let Some(s) = p8scii_button_id(ch) {
-                out.extend_from_slice(s);
-            } else {
-                // PICO-8 treats high-byte glyphs as identifier characters; map
-                // each byte deterministically to a Lua-safe identifier so code
-                // like `fills = {A,B,...}` (glyph variable names) parses.
-                let hex = b"0123456789abcdef";
-                out.extend_from_slice(b"_p8_");
-                out.push(hex[(ch >> 4) as usize]);
-                out.push(hex[(ch & 0x0f) as usize]);
+            // Button glyphs substitute to their numeric constants in
+            // expression position -- but NOT when the glyph is being used
+            // as an identifier key (`{<glyph>=split"-1,0"}` stores under
+            // the raw-byte STRING key, and `<glyph>` reads back the
+            // constant elsewhere; both confirmed via oracle on the same
+            // probe). "Used as a key" = directly followed by a single `=`.
+            // All other glyphs pass through raw: the lexer treats high
+            // bytes as identifier characters, so a glyph variable's real
+            // name IS its raw byte -- matching official, where
+            // `t={\x8b=1}` and `t["\x8b"]` are the same slot.
+            let mut peek = i + 1;
+            while peek < line.len() && (line[peek] == b' ' || line[peek] == b'\t') {
+                peek += 1;
             }
+            let followed_by_assign = peek < line.len()
+                && line[peek] == b'='
+                && !(peek + 1 < line.len() && line[peek + 1] == b'=');
+            // Part of a larger identifier (`nes_btn.<glyph>p`,
+            // seamonsterquest_release1c-0.p8.png) -- adjacent identifier
+            // characters or a preceding `.` mean the glyph is a name
+            // fragment, not a standalone button expression.
+            let ident_char = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
+            let in_identifier = (i > 0 && (ident_char(line[i - 1]) || line[i - 1] == b'.'))
+                || (i + 1 < line.len() && ident_char(line[i + 1]));
+            if !followed_by_assign && !in_identifier {
+                if let Some(s) = p8scii_button_id(ch) {
+                    out.extend_from_slice(s);
+                    i += 1;
+                    continue;
+                }
+            }
+            out.push(ch);
             i += 1;
             continue;
         }
@@ -1142,7 +1162,8 @@ fn extract_lhs(out: &[u8]) -> LhsResult<'_> {
             // a real corpus cart (hakai-3.p8.png: `?"time:"..timer\1,...`).
             break;
         }
-        if ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'.' {
+        if ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'.' || ch >= 0x80 {
+            // (High bytes are P8SCII glyph identifier characters.)
             start -= 1;
         } else if (ch == b')' || ch == b']' || ch == b'"' || ch == b'\'')
             && start < end
@@ -1687,23 +1708,20 @@ fn try_compound_assign(line: &[u8], pos: usize, out: &mut Vec<u8>) -> Option<usi
     let rhs_info = extract_rhs(line, rhs_start);
     let raw_rhs = rhs_info.rhs;
     // Recursively preprocess the RHS so operators inside get transformed.
-    let processed_rhs_string: String = if !raw_rhs.is_empty() {
-        let s = unsafe { core::str::from_utf8_unchecked(raw_rhs) };
-        let p = preprocess(s);
+    let processed_rhs: Vec<u8> = if !raw_rhs.is_empty() {
+        let mut p = preprocess(raw_rhs);
         // Trim trailing newlines that preprocess() may have added between lines.
-        let bytes = p.as_bytes();
-        let mut end = bytes.len();
-        while end > 0 && bytes[end - 1] == b'\n' {
-            end -= 1;
+        while p.last() == Some(&b'\n') {
+            p.pop();
         }
-        String::from(unsafe { core::str::from_utf8_unchecked(&bytes[..end]) })
+        p
     } else {
-        String::new()
+        Vec::new()
     };
     let rhs: &[u8] = if raw_rhs.is_empty() {
         raw_rhs
     } else {
-        processed_rhs_string.as_bytes()
+        &processed_rhs
     };
 
     if rhs.is_empty() {
@@ -1854,15 +1872,12 @@ fn try_bitwise_op(
     // the real Lua lexer can't parse. Confirmed on real corpus carts
     // (sujurejaba-0.p8.png, spirit_solstice-9.p8.png and others:
     // `<expr> & 0b<literal> <comparison>`).
-    let processed_rhs_string: String = {
-        let s = unsafe { core::str::from_utf8_unchecked(rhs_info.expr) };
-        let p = preprocess(s);
-        let bytes = p.as_bytes();
-        let mut end = bytes.len();
-        while end > 0 && bytes[end - 1] == b'\n' {
-            end -= 1;
+    let processed_rhs: Vec<u8> = {
+        let mut p = preprocess(rhs_info.expr);
+        while p.last() == Some(&b'\n') {
+            p.pop();
         }
-        String::from(unsafe { core::str::from_utf8_unchecked(&bytes[..end]) })
+        p
     };
 
     out.truncate(out.len() - lhs_result.remove_count);
@@ -1870,7 +1885,7 @@ fn try_bitwise_op(
     out.push(b'(');
     out.extend_from_slice(lhs);
     out.push(b',');
-    out.extend_from_slice(processed_rhs_string.as_bytes());
+    out.extend_from_slice(&processed_rhs);
     out.push(b')');
     Some(rhs_info.end)
 }

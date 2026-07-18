@@ -1,7 +1,7 @@
 use crate::memory::{self, Memory};
 
 pub struct Cart {
-    pub lua_code: String,
+    pub lua_code: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -121,7 +121,7 @@ fn parse_p8_text(content: &[u8], memory: &mut Memory) -> Result<Cart, CartError>
     }
 
     Ok(Cart {
-        lua_code: String::from_utf8_lossy(&lua_lines).into_owned(),
+        lua_code: lua_lines,
     })
 }
 
@@ -280,9 +280,7 @@ fn parse_p8_png(data: &[u8], memory: &mut Memory) -> Result<Cart, CartError> {
     let lua_region = &cart_data[0x4300..0x8000];
     let lua_code = decompress_lua(lua_region)?;
 
-    Ok(Cart {
-        lua_code: String::from_utf8_lossy(&lua_code).into_owned(),
-    })
+    Ok(Cart { lua_code })
 }
 
 fn decode_png(data: &[u8]) -> Result<Vec<u8>, CartError> {

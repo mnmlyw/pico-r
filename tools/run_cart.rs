@@ -39,8 +39,8 @@ fn main() {
         eprintln!("LOAD ERROR: {}", e);
         // Dump the relevant part of preprocessed source for context
         eprintln!("---- preprocessed (head) ----");
-        for line in processed.lines().take(20) {
-            eprintln!("{}", line);
+        for line in processed.split(|&b| b == b'\n').take(20) {
+            eprintln!("{}", String::from_utf8_lossy(line));
         }
         std::process::exit(2);
     }
