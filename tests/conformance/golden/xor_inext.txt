@@ -1,0 +1,4 @@
+RESULT binary_tilde 6
+RESULT tilde_unary_5 -5
+RESULT inext 1:10 2:20 3:30 
+DONE

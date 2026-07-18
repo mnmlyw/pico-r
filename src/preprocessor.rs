@@ -490,8 +490,18 @@ fn process_line(
             }
         }
 
-        // Unary bitwise NOT: ~expr
+        // `~` (when not `~=`): binary XOR when a value precedes it
+        // (`j~i` == `j^^i`, Lua-5.3 style -- confirmed via oracle:
+        // 5~3 == 6; real corpus carts brandgnume-1.p8.png,
+        // kokoroko-3.p8.png), otherwise unary bitwise NOT (`~x` ->
+        // bnot(x)).
         if ch == b'~' && !(i + 1 < line.len() && line[i + 1] == b'=') {
+            if is_prev_value(line, i) {
+                if let Some(new_i) = try_bitwise_op(line, i, 1, b"bxor", out) {
+                    i = new_i;
+                    continue;
+                }
+            }
             let info = extract_simple_expr(line, i + 1);
             if !info.expr.is_empty() {
                 out.extend_from_slice(b"bnot(");

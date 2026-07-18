@@ -139,6 +139,7 @@ pub fn register_all(globals: &Rc<Table>) {
     set("pairs", lua_pairs);
     set("ipairs", lua_ipairs);
     set("next", lua_next);
+    set("inext", lua_inext);
     set("select", lua_select);
     set("setmetatable", lua_setmetatable);
     set("getmetatable", lua_getmetatable);
@@ -367,6 +368,28 @@ fn lua_next(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
         }
     }
     Ok(vec![nil()])
+}
+
+// `inext(t, i)` -- the sequence-indexed companion to next() (what
+// `for i,v in inext,t` iterates with): returns i+1, t[i+1] until the
+// first nil slot. Confirmed a real builtin via oracle; used by real
+// corpus carts (kalikan_stage_1b-3.p8.png, redash-7.p8.png).
+fn lua_inext(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    let t = match args.first() {
+        Some(Value::Table(t)) => t.clone(),
+        _ => return Err(RtError::msg("inext: not a table")),
+    };
+    let prev = args
+        .get(1)
+        .and_then(|v| v.as_number())
+        .map(|n| n as i64)
+        .unwrap_or(0);
+    let next_i = prev + 1;
+    let v = t.borrow().get(&Value::Number(next_i as f64));
+    if matches!(v, Value::Nil) {
+        return Ok(vec![nil()]);
+    }
+    Ok(vec![num(next_i as f64), v])
 }
 
 fn key_to_value(k: &Key) -> Value {
