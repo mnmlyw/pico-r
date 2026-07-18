@@ -12,6 +12,7 @@ use super::value::*;
 use crate::gfx;
 use crate::memory as mem;
 use crate::state::PicoState;
+use crate::trigtables::{ATANTABLE, SINTABLE};
 
 // === Helpers ===
 
@@ -482,27 +483,82 @@ fn api_sqrt(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
     Ok(vec![num(quantize(if v >= 0.0 { v.sqrt() } else { 0.0 }))])
 }
+// PICO-8's sin()/cos() are NOT continuous math -- they reduce the
+// argument to a single 1/4-turn octant and look up a 4096-entry
+// table (SINTABLE) that z8lua generated as `sin(x) - 4*x` over
+// x in [0, 0.25] turns, so that adding the linear term back
+// (`idx*16`) reconstructs `sin` while keeping the stored magnitudes
+// small enough to fit in a u16. This mirrors z8lua's `sin_helper`
+// bit-for-bit (see LEDGER.md for how this was reverse-engineered and
+// confirmed against the real PICO-8 binary).
+//
+// `x_bits` is the 16.16 fixed-point bit pattern of the argument, in
+// "turns" (same convention `to_fixed`/`from_fixed` use elsewhere).
+fn sin_helper(x_bits: i32) -> i32 {
+    // Fold to the first quarter-turn: PICO-8 uses `sin(x) == sin(~x)`
+    // (bitwise complement, not `-x`) rather than a mirror around 0.25.
+    let comp = if x_bits & 0x4000 != 0 {
+        !x_bits
+    } else {
+        x_bits
+    };
+    // Low 14 bits address a quarter turn at 1/16384 resolution; `+2`
+    // rounds the 2 bits about to be dropped by the `>>2` below.
+    let a = (comp & 0x3fff) + 2;
+    // `a>>2` can reach exactly `SINTABLE.len()` (4096) when the low 14
+    // bits are all set -- one past the last real entry. That case sits
+    // exactly on a table boundary where the reconstructed value would
+    // be `4096*16 + 0`; clamping to the last entry (`4095*16 + 16`)
+    // gives the identical result, so no out-of-bounds table is needed.
+    let idx = ((a >> 2) as usize).min(SINTABLE.len() - 1);
+    let ret_bits = (idx as i32) * 16 + SINTABLE[idx] as i32;
+    if x_bits & 0x8000 != 0 {
+        ret_bits
+    } else {
+        -ret_bits
+    }
+}
 fn api_sin(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
-    Ok(vec![num(quantize(-(v * std::f64::consts::TAU).sin()))])
+    Ok(vec![num(from_fixed(sin_helper(to_fixed(v))))])
 }
 fn api_cos(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
-    Ok(vec![num(quantize((v * std::f64::consts::TAU).cos()))])
+    // cos(x) == sin(x - 0.25 turns)
+    let shifted = to_fixed(v).wrapping_sub(0x4000);
+    Ok(vec![num(from_fixed(sin_helper(shifted)))])
 }
 fn api_atan2(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    // Mirrors z8lua's `pico8_atan2`: reduce |dy/dx| to octant 0..=1 via
+    // ATANTABLE (2049 entries, 1/2048-turn resolution, generated as
+    // `atan2(1, -i)` for i in [0,1]), then fold quadrants back in with
+    // sign/complement math rather than reflecting through -x.
     let dx = arg_num(&a, 0).unwrap_or(0.0);
     let dy = arg_num(&a, 1).unwrap_or(0.0);
-    if dx == 0.0 && dy == 0.0 {
-        return Ok(vec![num(0.25)]);
+    let x_bits = to_fixed(dx);
+    let y_bits = to_fixed(dy);
+    let mut bits: i32 = 0x4000;
+    if x_bits != 0 {
+        let q = ((y_bits as i64).abs() << 16) / (x_bits as i64).abs();
+        if q > 0x10000 {
+            // |dy/dx| > 1: look up the reciprocal instead (ATANTABLE
+            // only covers ratios in [0,1], i.e. angles up to 45deg) and
+            // use the complementary-angle identity.
+            let recip = (1i64 << 32) / q;
+            let idx = ((recip >> 5) as usize).min(ATANTABLE.len() - 1);
+            bits -= ATANTABLE[idx] as i32;
+        } else {
+            let idx = ((q >> 5) as usize).min(ATANTABLE.len() - 1);
+            bits = ATANTABLE[idx] as i32;
+        }
     }
-    // PICO-8 atan2 returns turns in [0,1) with y inverted
-    let r = (-dy).atan2(dx);
-    let mut t = r / std::f64::consts::TAU;
-    if t < 0.0 {
-        t += 1.0;
+    if x_bits < 0 {
+        bits = 0x8000 - bits;
     }
-    Ok(vec![num(quantize(t))])
+    if y_bits > 0 {
+        bits = (-bits) & 0xffff;
+    }
+    Ok(vec![num(from_fixed(bits))])
 }
 fn api_max(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let mut r = arg_num(&a, 0).unwrap_or(0.0);
