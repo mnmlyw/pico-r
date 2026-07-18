@@ -197,6 +197,7 @@ pub fn register_all(globals: &Rc<Table>) {
     set("pset", api_pset);
     set("pget", api_pget);
     set("line", api_line);
+    set("tline", api_tline);
     set("rect", api_rect);
     set("rectfill", api_rectfill);
     set("circ", api_circ);
@@ -235,6 +236,7 @@ pub fn register_all(globals: &Rc<Table>) {
     set("memcpy", api_memcpy);
     set("memset", api_memset);
     set("reload", api_reload);
+    set("load", api_load);
     set("cstore", api_cstore);
 
     // === Audio ===
@@ -1816,6 +1818,28 @@ fn api_menuitem(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> 
     Ok(vec![])
 }
 fn api_extcmd(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    Ok(vec![])
+}
+// `load(filename,[breadcrumb],[param_str])` loads and starts running a
+// *different* cart -- a multi-cart "warp" mechanism. Confirmed real via
+// oracle (calling it with a nonexistent cart name doesn't error; execution
+// just continues past it). This engine only ever loads one cart per
+// invocation and has no concept of switching carts at runtime, so this is
+// stubbed as a no-op -- confirmed real-world impact unblocking a crash on
+// a real corpus cart (solitomb-2.p8.png: `load'solitomb_title'` in _init).
+fn api_load(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    Ok(vec![])
+}
+// `tline(x0,y0,x1,y1,mx,my,[mdx,mdy],[layers])` draws a textured line,
+// sampling colors from the map/sprite region as it steps -- confirmed a
+// real API function via oracle (doesn't error), but stubbed as a no-op:
+// getting its raster algorithm (exact per-pixel step count, coordinate
+// space across PICO-8 versions, the optional `layers` mask) right needs
+// careful oracle verification against real sprite/map data this session's
+// probe carts don't have. Unblocks a real corpus cart from crashing
+// (tomorrow-6.p8.png) at the cost of not drawing anything -- same
+// no-crash-first tradeoff as the other host-integration stubs here.
+fn api_tline(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![])
 }
 // `_set_fps(n)` overrides the target frame rate to an arbitrary value
