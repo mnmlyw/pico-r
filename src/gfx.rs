@@ -275,49 +275,75 @@ pub fn ovalfill(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8
 }
 
 fn draw_oval(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8, fill: bool) {
-    let cx_2 = x0 + x1;
-    let cy_2 = y0 + y1;
-    let rx = (if x1 > x0 { x1 - x0 } else { x0 - x1 }) / 2;
-    let ry = (if y1 > y0 { y1 - y0 } else { y0 - y1 }) / 2;
-    if rx == 0 && ry == 0 {
+    // Per-row exact scan (not an incremental midpoint stepper): the
+    // previous single-loop midpoint-ellipse implementation could
+    // terminate before x reached 0, missing the top/bottom pole pixels
+    // entirely (confirmed against official PICO-8 even for an
+    // exact-integer bounding box, not just an odd-sized one). Scanning
+    // every row directly from the ellipse equation can't have that class
+    // of bug, and correctly handles half-integer centers/radii (odd
+    // bounding boxes) without truncating them first.
+    let (x0, x1) = (x0.min(x1), x0.max(x1));
+    let (y0, y1) = (y0.min(y1), y0.max(y1));
+    // x0..=x1 is an INCLUSIVE pixel range, so in continuous coordinates
+    // (each pixel `p` spans [p, p+1)) the box spans x0..(x1+1) -- confirmed
+    // row-by-row against official PICO-8: using (x1-x0)/2 as the radius
+    // (excluding the +1) shifts the whole curve and breaks top/bottom
+    // symmetry (rows above center came out too wide, rows below too
+    // narrow, and the bottom pole row vanished entirely).
+    let cx = (x0 + x1 + 1) as f64 / 2.0;
+    let cy = (y0 + y1 + 1) as f64 / 2.0;
+    let rx = (x1 - x0 + 1) as f64 / 2.0;
+    let ry = (y1 - y0 + 1) as f64 / 2.0;
+    if x0 == x1 && y0 == y1 {
         put_pixel(memory, x0, y0, col);
         return;
     }
-
-    let a: i64 = rx as i64 * rx as i64;
-    let b: i64 = ry as i64 * ry as i64;
-
-    let mut x: i32 = rx;
-    let mut y: i32 = 0;
-    let mut dx: i64 = (1 - 2 * rx as i64) * b;
-    let mut dy: i64 = a;
-    let mut err: i64 = 0;
-
-    while b * x as i64 * x as i64 + a * y as i64 * y as i64 <= a * b {
+    for py in y0..=y1 {
+        // Sample at the pixel's vertical center.
+        let dy = (py as f64 + 0.5) - cy;
+        let t = 1.0 - (dy / ry) * (dy / ry);
+        if t < 0.0 {
+            continue;
+        }
+        let dx_extent = rx * t.sqrt();
+        // A column's CENTER (px+0.5) must fall within [cx-dx_extent,
+        // cx+dx_extent] for that column to be part of the shape.
+        let lx = (cx - dx_extent - 0.5).ceil() as i32;
+        let rx2 = (cx + dx_extent - 0.5).floor() as i32;
         if fill {
-            let lx = (cx_2 - 2 * x) / 2;
-            let rx2 = (cx_2 + 2 * x) / 2;
-            let ty = (cy_2 - 2 * y) / 2;
-            let by = (cy_2 + 2 * y) / 2;
-            let mut xi = lx;
-            while xi <= rx2 {
-                put_pixel(memory, xi, ty, col);
-                put_pixel(memory, xi, by, col);
-                xi += 1;
+            // Not hline(): it calls put_pixel_raw directly and skips the
+            // camera-offset transform that put_pixel applies.
+            let mut px = lx;
+            while px <= rx2 {
+                put_pixel(memory, px, py, col);
+                px += 1;
             }
         } else {
-            put_pixel(memory, (cx_2 + 2 * x) / 2, (cy_2 + 2 * y) / 2, col);
-            put_pixel(memory, (cx_2 - 2 * x) / 2, (cy_2 + 2 * y) / 2, col);
-            put_pixel(memory, (cx_2 + 2 * x) / 2, (cy_2 - 2 * y) / 2, col);
-            put_pixel(memory, (cx_2 - 2 * x) / 2, (cy_2 - 2 * y) / 2, col);
+            put_pixel(memory, lx, py, col);
+            put_pixel(memory, rx2, py, col);
         }
-        y += 1;
-        err += dy;
-        dy += 2 * a;
-        if 2 * err + dx > 0 {
-            x -= 1;
-            err += dx;
-            dx += 2 * b;
+    }
+    if !fill {
+        // A row-only scan leaves gaps near the top/bottom poles: official
+        // PICO-8 draws a flat horizontal run of several pixels there
+        // (confirmed -- e.g. the very top row of a wide, short oval has
+        // ~11 pixels lit, not just its 2 boundary columns), because the
+        // curve is nearly horizontal in that region. A column scan (top
+        // and bottom per column) naturally fills exactly that gap, the
+        // same way the row scan handles the near-vertical left/right
+        // regions -- together they give a complete, gap-free outline.
+        for px in x0..=x1 {
+            let dx = (px as f64 + 0.5) - cx;
+            let t = 1.0 - (dx / rx) * (dx / rx);
+            if t < 0.0 {
+                continue;
+            }
+            let dy_extent = ry * t.sqrt();
+            let ty = (cy - dy_extent - 0.5).ceil() as i32;
+            let by = (cy + dy_extent - 0.5).floor() as i32;
+            put_pixel(memory, px, ty, col);
+            put_pixel(memory, px, by, col);
         }
     }
 }

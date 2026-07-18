@@ -1,0 +1,6 @@
+RESULT oval_a 16616
+RESULT oval_circle 21680
+RESULT oval_outline 30656
+RESULT oval_small 11730
+RESULT oval_odd_bbox 14592
+DONE
