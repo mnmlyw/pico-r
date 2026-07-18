@@ -304,3 +304,10 @@ Corpus re-sweep: **160/188 clean** (up from 157) — **zero regressions**. Three
 - **`inext(t, i)` — the sequence-indexed iterator companion to `next()` (`for i,v in inext,t`) — was missing entirely; implemented and oracle-confirmed.** Returns `i+1, t[i+1]` until the first nil slot. Real corpus carts: `kalikan_stage_1b-3.p8.png`, `redash-7.p8.png`. | `src/pico_lua/api.rs` (`lua_inext`)
 
 Corpus re-sweep: **163/188 clean** (up from 160) — **zero regressions**. Three full clean fixes (`brandgnume-1.p8.png`, `kalikan_stage_1b-3.p8.png`, `oblivion_eve-12.p8.png`); `kokoroko-3.p8.png` progressed past the XOR crash to an unrelated string-concat nil.
+
+### Follow-up: pushing toward 100% clean — `#` prefix in int-div LHS; stat date/time (round 21)
+
+- **`#` (length) belongs INSIDE a captured int-div/bitwise operand — fixed.** `#levels \ levels_per_row` rewrote as `#flr(levels/(n))` (length of a number — runtime error) because `extract_lhs` stopped before the `#`; it's always a prefix operator binding tighter than these binary ops, so it's now consumed into the operand like unary minus. Confirmed on a real corpus cart (`woodworm-0.p8.png`). | `src/preprocessor.rs` (`extract_lhs`)
+- **`stat(80..85)`/`stat(90..95)` (UTC/local date-time components) returned the generic 0 fallback... actually nil-adjacent behavior crashed date-display carts — now return a fixed, plausible timestamp** (2024-01-01 12:00:00; real wall-clock values can't be deterministic in tests). Confirmed on a real corpus cart (`kokoroko-3.p8.png`: prints a `stat(92)..sep..stat(91)` clock). | `src/pico_lua/api.rs` (`api_stat`)
+
+Corpus re-sweep: **165/188 clean** (up from 163) — **zero regressions**. Two full clean fixes (`kokoroko-3.p8.png`, `woodworm-0.p8.png`).

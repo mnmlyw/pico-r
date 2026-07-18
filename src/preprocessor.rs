@@ -1196,6 +1196,14 @@ fn extract_lhs(out: &[u8]) -> LhsResult<'_> {
             // `-flr(5/(0))` instead of `flr(-5/(0))` -- the sign ended up
             // outside the call instead of inside the operand.
             start -= 1;
+        } else if ch == b'#' {
+            // `#` is always a prefix operator in Lua and binds tighter than
+            // the binary ops these rewrites serve, so it belongs INSIDE the
+            // captured operand: `#levels\n` means `flr((#levels)/n)`, but
+            // stopping before the `#` produced `#flr(levels/(n))` -- length
+            // of a number, a runtime error. Confirmed on a real corpus
+            // cart (woodworm-0.p8.png).
+            start -= 1;
         } else {
             break;
         }

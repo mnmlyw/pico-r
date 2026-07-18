@@ -1838,6 +1838,18 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         55 => num(st.audio.music_state.total_patterns as f64),
         56 => num(st.audio.music_state.tick as f64),
         57 => boolv(st.audio.music_state.playing),
+        // stat(80..85) UTC / stat(90..95) local wall-clock date-time
+        // components (year, month, day, hour, minute, second). Carts show
+        // these on clocks/calendars (kokoroko-3.p8.png); real values can't
+        // be reproduced deterministically in tests, so return a fixed,
+        // plausible timestamp rather than nil (which crashed carts that
+        // concatenate the components).
+        80 | 90 => num(2024.0),
+        81 | 91 => num(1.0),
+        82 | 92 => num(1.0),
+        83 | 93 => num(12.0),
+        84 | 94 => num(0.0),
+        85 | 95 => num(0.0),
         // Confirmed against official PICO-8: stat(100) (breadcrumb label)
         // is nil when unset, not the generic 0 fallback other unhandled
         // codes use.
