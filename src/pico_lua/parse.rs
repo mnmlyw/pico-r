@@ -141,16 +141,28 @@ impl Parser {
         }
     }
 
+    // `if`/`elseif` accept `do` as an alternative to `then` -- confirmed
+    // against official PICO-8 (both `if cond do ... end` and `elseif cond
+    // do ... end` parse, with or without parens around cond; unlike
+    // `while`, which does NOT accept `then` in place of `do`). Real corpus
+    // carts use this (build_a_jetpack-1.p8.png).
+    fn expect_then_or_do(&mut self) -> Result<(), ParseError> {
+        if self.eat(&Tok::Then) || self.eat(&Tok::Do) {
+            return Ok(());
+        }
+        Err(self.err("expected 'then'"))
+    }
+
     fn parse_if(&mut self) -> Result<Stat, ParseError> {
         self.pos += 1;
         let mut arms = Vec::new();
         let cond = self.parse_expr()?;
-        self.expect(&Tok::Then, "'then'")?;
+        self.expect_then_or_do()?;
         let body = self.parse_block()?;
         arms.push((cond, body));
         while self.eat(&Tok::Elseif) {
             let c = self.parse_expr()?;
-            self.expect(&Tok::Then, "'then'")?;
+            self.expect_then_or_do()?;
             let b = self.parse_block()?;
             arms.push((c, b));
         }

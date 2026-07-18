@@ -611,6 +611,79 @@ fn match_keyword_at(line: &[u8], pos: usize, keyword: &[u8]) -> bool {
     true
 }
 
+// Scans a condition expression (starting right at its `if`/`while` — the
+// position just after the keyword itself, before any leading whitespace)
+// to determine whether it already has its own explicit `then`/`do`
+// separator later on this same line, returning the index just past it if
+// so. Tracks paren/bracket/brace depth (so operators/indexing after an
+// initial parenthesized prefix don't get mistaken for the separator
+// position) and a nesting depth of `if`/`while`/`for` keywords seen at
+// depth 0, closed by `end` -- NOT by their own `then`/`do`, since a single
+// nested `if...elseif...elseif...end` can contain several `then`s (one per
+// clause) that all still belong to that one nested statement until its
+// `end`. `then`/`do` only counts as THIS statement's own separator when
+// found at nesting depth 0. See `expand_short_ifs`'s call site for the two
+// real corpus patterns this distinguishes.
+fn find_own_separator(line: &[u8], start: usize) -> Option<usize> {
+    let mut i = start;
+    let mut depth: i32 = 0;
+    let mut in_str: u8 = 0;
+    let mut nest: i32 = 0;
+    while i < line.len() {
+        let ch = line[i];
+        if in_str != 0 {
+            if ch == b'\\' && i + 1 < line.len() {
+                i += 2;
+                continue;
+            }
+            if ch == in_str {
+                in_str = 0;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == b'"' || ch == b'\'' {
+            in_str = ch;
+            i += 1;
+            continue;
+        }
+        if ch == b'-' && i + 1 < line.len() && line[i + 1] == b'-' {
+            return None;
+        }
+        if matches!(ch, b'(' | b'[' | b'{') {
+            depth += 1;
+            i += 1;
+            continue;
+        }
+        if matches!(ch, b')' | b']' | b'}') {
+            depth -= 1;
+            i += 1;
+            continue;
+        }
+        if depth == 0 && ch.is_ascii_alphabetic() {
+            if match_keyword_at(line, i, b"if")
+                || match_keyword_at(line, i, b"while")
+                || match_keyword_at(line, i, b"for")
+            {
+                nest += 1;
+            } else if match_keyword_at(line, i, b"end") {
+                nest -= 1;
+            } else if nest == 0
+                && (match_keyword_at(line, i, b"then") || match_keyword_at(line, i, b"do"))
+            {
+                let kw_len = if line[i] == b't' { 4 } else { 2 };
+                return Some(i + kw_len);
+            }
+            while i < line.len() && (line[i].is_ascii_alphanumeric() || line[i] == b'_') {
+                i += 1;
+            }
+            continue;
+        }
+        i += 1;
+    }
+    None
+}
+
 fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
     if !contains(line, b"if") && !contains(line, b"while") {
         return None;
@@ -698,12 +771,25 @@ fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
                     k += 1;
                 }
                 if depth == 0 && k < line.len() {
-                    let mut after = k + 1;
-                    while after < line.len() && (line[after] == b' ' || line[after] == b'\t') {
-                        after += 1;
-                    }
-                    let rest = &line[k + 1..];
-                    let has_sep = has_separator_keyword(rest, separator);
+                    // Whether this already has an explicit separator (`if(cond)
+                    // then ...`, just with parens around the condition) can't
+                    // just look at the token immediately after the first
+                    // balanced `)` -- the condition can legitimately continue
+                    // past it via indexing, comparison, or other operators
+                    // (`if (a-b) > 0.1 then`, `if ({...})[k] then`, both real
+                    // corpus patterns: sheeple-0.p8.png, kaizoleste-1.p8.png).
+                    // Nor can it scan the whole rest of the line for a bare
+                    // `then`/`do` anywhere (the old `has_separator_keyword`
+                    // helper's approach) -- that falsely matches a separator
+                    // belonging to a *nested* compound statement used AS the
+                    // short-if's body, e.g. `if(a) if b then c end` (also
+                    // real: build_a_jetpack-1.p8.png, tinyhawk-2.p8.png).
+                    // `find_own_separator` resolves both: it scans the actual
+                    // condition expression (through operators/indexing) and
+                    // discounts any then/do consumed by a nested if/while/for
+                    // seen along the way, so only THIS statement's own
+                    // separator (if present) is reported.
+                    let has_sep = find_own_separator(line, j).is_some();
                     if !has_sep {
                         let body_start = k + 1;
                         let trimmed_offset = line[body_start..]
@@ -802,42 +888,6 @@ fn is_continuation_body(rest: &[u8]) -> bool {
     ];
     if DANGLING_OPS.contains(&trimmed) {
         return true;
-    }
-    false
-}
-
-fn has_separator_keyword(text: &[u8], sep: &[u8]) -> bool {
-    let mut j = 0;
-    let mut in_str: u8 = 0;
-    while j < text.len() {
-        if in_str != 0 {
-            if text[j] == b'\\' && j + 1 < text.len() {
-                j += 2;
-                continue;
-            }
-            if text[j] == in_str {
-                in_str = 0;
-            }
-            j += 1;
-            continue;
-        }
-        if text[j] == b'"' || text[j] == b'\'' {
-            in_str = text[j];
-            j += 1;
-            continue;
-        }
-        if text[j] == b'-' && j + 1 < text.len() && text[j + 1] == b'-' {
-            break;
-        }
-        if j + sep.len() <= text.len() && &text[j..j + sep.len()] == sep {
-            let before_ok = j == 0 || (!text[j - 1].is_ascii_alphanumeric() && text[j - 1] != b'_');
-            let after_ok = j + sep.len() >= text.len()
-                || (!text[j + sep.len()].is_ascii_alphanumeric() && text[j + sep.len()] != b'_');
-            if before_ok && after_ok {
-                return true;
-            }
-        }
-        j += 1;
     }
     false
 }

@@ -1,0 +1,3 @@
+RESULT paren_prefix_comparison ok
+RESULT paren_prefix_index ok
+DONE

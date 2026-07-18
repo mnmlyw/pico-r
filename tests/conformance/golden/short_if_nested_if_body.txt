@@ -1,0 +1,2 @@
+RESULT nested_short_if 5
+DONE
