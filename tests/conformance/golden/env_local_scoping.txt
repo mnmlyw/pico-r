@@ -1,0 +1,5 @@
+RESULT no_g [nil]
+RESULT param_env 15 22
+RESULT do_env 101 42
+RESULT for_env 16
+DONE

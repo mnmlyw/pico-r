@@ -51,19 +51,17 @@ impl LuaImpl {
         let globals = Rc::new(RefCell::new(TableInner::new()));
         api::register_all(&globals);
 
-        // Install _G as a self-reference
-        globals.borrow_mut().set(
-            Value::Str(Rc::from(b"_G".as_slice())),
-            Value::Table(Rc::clone(&globals)),
-        );
+        // NOTE: official PICO-8 does NOT define `_G` (confirmed via oracle:
+        // `tostr(_G)` prints "[nil]") -- deliberately not registered here.
 
         let interp = Interp::new(globals);
 
-        // `_ENV` -- confirmed against official PICO-8 that it's a distinct
-        // table identity from `_G` (see `Interp::env_proxy`'s doc comment),
-        // but reads/writes through it still reach real globals. A handful
-        // of corpus carts share a common "class helper" snippet that does
-        // `_ENV[name] = function...` to define globals dynamically.
+        // `_ENV` -- confirmed against official PICO-8 that it's a real
+        // table (`tostr(_ENV)` prints "[table]"; reads/writes through it
+        // observably affect real globals). A handful of corpus carts share
+        // a common "class helper" snippet that does `_ENV[name] =
+        // function...` to define globals dynamically, and OOP-style carts
+        // chain metatables' `__index` to a captured top-level `_ENV`.
         interp.globals.borrow_mut().set(
             Value::Str(Rc::from(b"_ENV".as_slice())),
             Value::Table(Rc::clone(&interp.env_proxy)),
@@ -149,9 +147,10 @@ impl LuaEngine for LuaImpl {
         });
 
         // Install the env-fallback shim before user code runs (so `all()` results
-        // used as _ENV resolve globals via __index=_G). PICO-Z does this via Lua
-        // source; we replicate it.
-        let shim = b"do local mt={__index=_G} local rawall=all local rawforeach=foreach \
+        // used as _ENV resolve globals via __index=_ENV; official PICO-8 has no
+        // _G at all, confirmed via oracle). PICO-Z does this via Lua source; we
+        // replicate it.
+        let shim = b"do local mt={__index=_ENV} local rawall=all local rawforeach=foreach \
             local sm=setmetatable local gm=getmetatable local tp=type \
             local function wrap(v) if tp(v)==\"table\" and not gm(v) then sm(v,mt) end return v end \
             all=function(t) local it=rawall(t) return function(s,c) return wrap(it(s,c)) end,t end \

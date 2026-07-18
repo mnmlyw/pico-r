@@ -91,6 +91,20 @@ impl Interp {
         if let Some(slot) = self.find_slot(name) {
             return slot.borrow().clone();
         }
+        // Real Lua 5.2 `_ENV` scoping: a visible local/upvalue named `_ENV`
+        // redirects every free-name access in its scope through that table
+        // (respecting `__index`, so an env with a metatable chaining to _G
+        // still reaches builtins). Carts use `local _ENV=obj` /
+        // `for _ENV in all(t)` as an OOP idiom (praxis_fighter_x-2.p8.png,
+        // redash-7.p8.png). Ordinary carts never bind a local `_ENV`, so
+        // this misses and falls through to the plain globals lookup.
+        if name != "_ENV" {
+            if let Some(env_slot) = self.find_slot("_ENV") {
+                let env = env_slot.borrow().clone();
+                let key = Value::Str(Rc::from(name.as_bytes()));
+                return self.table_get(&env, &key).unwrap_or(Value::Nil);
+            }
+        }
         self.globals
             .borrow()
             .get(&Value::Str(Rc::from(name.as_bytes())))
@@ -114,11 +128,20 @@ impl Interp {
     pub fn assign_name(&mut self, name: &str, val: Value) {
         if let Some(slot) = self.find_slot(name) {
             *slot.borrow_mut() = val;
-        } else {
-            self.globals
-                .borrow_mut()
-                .set(Value::Str(Rc::from(name.as_bytes())), val);
+            return;
         }
+        // Mirror of `resolve`'s `_ENV` redirection for writes (see there).
+        if name != "_ENV" {
+            if let Some(env_slot) = self.find_slot("_ENV") {
+                let env = env_slot.borrow().clone();
+                let key = Value::Str(Rc::from(name.as_bytes()));
+                let _ = self.table_set(&env, key, val);
+                return;
+            }
+        }
+        self.globals
+            .borrow_mut()
+            .set(Value::Str(Rc::from(name.as_bytes())), val);
     }
 
     /// Execute a top-level chunk as `function(...) <body> end` and call it
