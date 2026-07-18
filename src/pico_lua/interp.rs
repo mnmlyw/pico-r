@@ -23,6 +23,13 @@ pub enum Flow {
 
 pub struct Interp {
     pub globals: Rc<Table>,
+    /// A distinct table identity for the `_ENV` global. Confirmed against
+    /// official PICO-8 that `_ENV ~= _G` (unlike stock Lua 5.2, where the
+    /// top-level chunk's `_ENV` upvalue and `_G` are the same table) even
+    /// though reads/writes through `_ENV[k]` still observably affect real
+    /// globals — `table_get`/`table_set` special-case this identity and
+    /// forward to `globals` rather than storing into this table directly.
+    pub env_proxy: Rc<Table>,
     /// Lexical scope chain — innermost frame at the end. Each frame is a
     /// Vec of (name, slot) where slot is shared so closures can capture.
     pub frames: Vec<Frame>,
@@ -49,6 +56,7 @@ impl Interp {
     pub fn new(globals: Rc<Table>) -> Self {
         Self {
             globals,
+            env_proxy: Rc::new(RefCell::new(TableInner::new())),
             frames: Vec::new(),
             host: std::ptr::null_mut(),
             chunkname: "cart".into(),
@@ -384,6 +392,10 @@ impl Interp {
     pub fn table_set(&mut self, t: &Value, k: Value, v: Value) -> Result<(), RtError> {
         match t {
             Value::Table(tbl) => {
+                if Rc::ptr_eq(tbl, &self.env_proxy) {
+                    self.globals.borrow_mut().set(k, v);
+                    return Ok(());
+                }
                 tbl.borrow_mut().set(k, v);
                 Ok(())
             }
@@ -397,6 +409,9 @@ impl Interp {
     pub fn table_get(&mut self, t: &Value, k: &Value) -> Result<Value, RtError> {
         match t {
             Value::Table(tbl) => {
+                if Rc::ptr_eq(tbl, &self.env_proxy) {
+                    return Ok(self.globals.borrow().get(k));
+                }
                 let v = tbl.borrow().get(k);
                 if !matches!(v, Value::Nil) {
                     return Ok(v);

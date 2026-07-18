@@ -58,6 +58,16 @@ impl LuaImpl {
         );
 
         let interp = Interp::new(globals);
+
+        // `_ENV` -- confirmed against official PICO-8 that it's a distinct
+        // table identity from `_G` (see `Interp::env_proxy`'s doc comment),
+        // but reads/writes through it still reach real globals. A handful
+        // of corpus carts share a common "class helper" snippet that does
+        // `_ENV[name] = function...` to define globals dynamically.
+        interp.globals.borrow_mut().set(
+            Value::Str(Rc::from(b"_ENV".as_slice())),
+            Value::Table(Rc::clone(&interp.env_proxy)),
+        );
         Self {
             interp,
             chunk: None,

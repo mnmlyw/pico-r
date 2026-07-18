@@ -1,0 +1,4 @@
+RESULT foo 42
+RESULT bar 7
+RESULT env_is_g false
+DONE
