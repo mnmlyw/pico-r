@@ -698,6 +698,7 @@ fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
 
     let mut result: Vec<u8> = Vec::with_capacity(line.len() + 16);
     let mut ends_needed: usize = 0;
+    let mut expanded_any = false;
     let mut i = 0;
     let mut in_str: u8 = 0;
 
@@ -727,7 +728,66 @@ fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
         }
 
         if ch == b'-' && i + 1 < line.len() && line[i + 1] == b'-' {
+            // A `--` comment runs to end of line, so any still-pending
+            // synthetic `end`s must be emitted BEFORE it -- appending them
+            // after the loop (the normal path) would bury them inside the
+            // comment text. Confirmed on a real corpus cart
+            // (dinkykong-0.p8.png: `if(not cstg.hr)return true --todo:...`).
+            for _ in 0..ends_needed {
+                result.extend_from_slice(b" end");
+            }
+            expanded_any |= ends_needed > 0;
+            ends_needed = 0;
             result.extend_from_slice(&line[i..]);
+            break;
+        }
+
+        if ch == b'?' && ends_needed > 0 {
+            // A `?` print-shorthand consumes to end of line (comments
+            // excepted), so — exactly like the trailing-comment case above —
+            // leaving it for process_line's later `?`-conversion would
+            // swallow the synthetic `end`s appended after the loop
+            // (`print(args end)`). The body-START case is already handled
+            // in the expansion branch below; this covers a `?` appearing
+            // MID-body, after other statements. Confirmed on a real corpus
+            // cart (dinkykong-0.p8.png: `if(ob.sel)rect(...) ?ob.x..","..`).
+            // Convert it here: print(<args up to any trailing comment>),
+            // then the pending `end`s, then any comment.
+            result.extend_from_slice(b"print(");
+            let mut j = i + 1;
+            let mut arg_str: u8 = 0;
+            while j < line.len() {
+                let c = line[j];
+                if arg_str != 0 {
+                    if c == b'\\' && j + 1 < line.len() {
+                        j += 2;
+                        continue;
+                    }
+                    if c == arg_str {
+                        arg_str = 0;
+                    }
+                } else if c == b'"' || c == b'\'' {
+                    arg_str = c;
+                } else if c == b'-' && j + 1 < line.len() && line[j + 1] == b'-' {
+                    break;
+                }
+                j += 1;
+            }
+            let mut arg_end = j;
+            while arg_end > i + 1 && (line[arg_end - 1] == b' ' || line[arg_end - 1] == b'\t') {
+                arg_end -= 1;
+            }
+            result.extend_from_slice(&line[i + 1..arg_end]);
+            result.push(b')');
+            for _ in 0..ends_needed {
+                result.extend_from_slice(b" end");
+            }
+            expanded_any = true;
+            ends_needed = 0;
+            if j < line.len() {
+                result.push(b' ');
+                result.extend_from_slice(&line[j..]);
+            }
             break;
         }
 
@@ -846,7 +906,7 @@ fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
         i += 1;
     }
 
-    if ends_needed == 0 {
+    if ends_needed == 0 && !expanded_any {
         return None;
     }
     for _ in 0..ends_needed {
@@ -966,6 +1026,14 @@ fn extract_lhs(out: &[u8]) -> LhsResult<'_> {
     let mut start = end;
     while start > 0 {
         let ch = out[start - 1];
+        if ch == b'.' && start >= 2 && out[start - 2] == b'.' {
+            // Two consecutive dots are the concat operator, not a field
+            // chain -- the LHS scan must stop here, or `"str"..x\1` walks
+            // back through the `..` and splices the concat's left side into
+            // the int-div rewrite (`"time:"flr(..timer/(1))`). Confirmed on
+            // a real corpus cart (hakai-3.p8.png: `?"time:"..timer\1,...`).
+            break;
+        }
         if ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'.' {
             start -= 1;
         } else if ch == b')' {
