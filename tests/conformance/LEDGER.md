@@ -318,3 +318,9 @@ Corpus re-sweep: **165/188 clean** (up from 163) — **zero regressions**. Two f
 - **`%` right after a string literal's closing quote is modulo, not the peek2 shortcut — fixed.** In operator position (these scanners only run outside string literals) a quote means a string value just ended — e.g. string-call sugar `p"n4"%6`. Added closing quotes to `is_prev_value`'s value-like set. Confirmed on a real corpus cart (`picodex_dual-1.p8.png`: `T.S[p"n4"%6+1]`, which now clears all parse errors and fails only on a deeper runtime gap). | `src/preprocessor.rs` (`is_prev_value`)
 
 Corpus re-sweep: **166/188 clean** (up from 165) — **zero regressions**. One full clean fix (`homunculus-0.p8.png`).
+
+### Follow-up: pushing toward 100% clean — multi-line compound-assign RHS (round 23)
+
+- **A compound-assign RHS that leaves parens open at end of line continues on later physical lines — fixed.** `bx+=d_mbtn(` with the call's arguments on following lines had its RHS capture stop at end of line, splicing a truncated fragment into the rewrite. When the captured RHS's paren/bracket depth is still positive at EOL, the rewrite now emits `lhs = lhs op rhs` WITHOUT the usual precedence-hygiene wrapping parens — the still-open source paren makes the continuation lines flow into the same expression and close it naturally. (The function-call `^^=`-style and int-div forms need a synthesized closing paren that can't be deferred; they keep the old single-line behavior.) Confirmed on real corpus carts (`build_a_jetpack-1.p8.png`, `pony9000_1_3_3-0.p8.png`). | `src/preprocessor.rs` (`try_compound_assign`)
+
+Corpus re-sweep: **168/188 clean** (up from 166) — **zero regressions**. Two full clean fixes (`build_a_jetpack-1.p8.png`, `pony9000_1_3_3-0.p8.png`).

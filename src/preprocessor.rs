@@ -1719,6 +1719,50 @@ fn try_compound_assign(line: &[u8], pos: usize, out: &mut Vec<u8>) -> Option<usi
         return Some(rhs_info.end);
     }
 
+    // Multi-line RHS: if the captured RHS leaves parens/brackets open at
+    // end of line (`bx+=d_mbtn(` with the args on following lines --
+    // build_a_jetpack-1.p8.png, pony9000_1_3_3-0.p8.png), the expression
+    // continues on later physical lines the line-based rewrite can't see.
+    // Emit `lhs = lhs op rhs` WITHOUT the usual wrapping parens: the
+    // still-open source paren makes the continuation flow into the same
+    // expression and close it naturally. (The wrap is only for precedence
+    // hygiene, and everything past the open paren is inside parens anyway.)
+    // The function-call (`^^=` etc.) and int-div forms need a synthesized
+    // closing paren we can't defer, so those keep the old behavior.
+    if !is_func && ch != b'\\' {
+        let mut depth: i32 = 0;
+        let mut in_s: u8 = 0;
+        let mut k = 0;
+        while k < raw_rhs.len() {
+            let c = raw_rhs[k];
+            if in_s != 0 {
+                if c == b'\\' {
+                    k += 1;
+                } else if c == in_s {
+                    in_s = 0;
+                }
+            } else if c == b'"' || c == b'\'' {
+                in_s = c;
+            } else if c == b'(' || c == b'[' || c == b'{' {
+                depth += 1;
+            } else if c == b')' || c == b']' || c == b'}' {
+                depth -= 1;
+            }
+            k += 1;
+        }
+        if depth > 0 {
+            out.truncate(out.len() - lhs_result.remove_count);
+            out.extend_from_slice(lhs);
+            out.extend_from_slice(b" = ");
+            out.extend_from_slice(lhs);
+            out.push(b' ');
+            out.extend_from_slice(op);
+            out.push(b' ');
+            out.extend_from_slice(rhs);
+            return Some(rhs_info.end);
+        }
+    }
+
     out.truncate(out.len() - lhs_result.remove_count);
 
     if is_func {
