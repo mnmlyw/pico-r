@@ -331,9 +331,19 @@ fn lua_next(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
     };
     let prev_key = args.get(1).cloned().unwrap_or(Value::Nil);
     let table = t.borrow();
-    // Build a deterministic-ish ordering based on hashmap iteration. Lua doesn't
-    // guarantee ordering anyway.
-    let keys: Vec<Key> = table.map.keys().cloned().collect();
+    // Sequential positive-integer ("array part") keys are yielded first, in
+    // ascending order -- this matches real Lua/PICO-8 for the common
+    // list-like-table case and is unambiguous, unlike hash-part order (which
+    // depends on real Lua's bucket layout/rehash history and isn't worth
+    // replicating -- see tests/conformance/LEDGER.md). Remaining keys follow
+    // in whatever order the backing HashMap iterates them (non-deterministic
+    // across runs, but real Lua/PICO-8's own hash-part order isn't a fixed
+    // target either).
+    let mut keys: Vec<Key> = table.map.keys().cloned().collect();
+    keys.sort_by_key(|k| match k {
+        Key::Int(i) if *i >= 1 => (0, *i),
+        _ => (1, 0),
+    });
     let prev_keyed = Key::from_value(&prev_key);
     let mut found = matches!(prev_key, Value::Nil);
     for k in &keys {
