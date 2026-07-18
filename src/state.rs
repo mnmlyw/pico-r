@@ -14,7 +14,15 @@ pub struct PicoState {
     pub frame_count: u32,
     pub elapsed_time: f64,
     pub target_fps: u8,
-    pub rng_state: u32,
+    // Real PICO-8's rnd()/srand() PRNG state (oracle-confirmed algorithm,
+    // see api.rs's rng_step/api_srand): two interleaved 32-bit words seeded
+    // via srand()'s xor+32-warmup. The default here is that same derivation
+    // applied to seed 0 -- there's no "correct" default to match, since
+    // official PICO-8 itself seeds an un-srand()'d cart from wall-clock time
+    // (confirmed non-reproducible run-to-run), so any fixed default is only
+    // ever an approximation for the un-seeded case.
+    pub rng_hi: u32,
+    pub rng_lo: u32,
 
     // line() pen state
     pub line_x: i32,
@@ -40,7 +48,8 @@ impl PicoState {
             frame_count: 0,
             elapsed_time: 0.0,
             target_fps: 30,
-            rng_state: 1,
+            rng_hi: 0xd67ce1e8,
+            rng_lo: 0x42cfadf8,
             line_x: 0,
             line_y: 0,
             line_valid: false,
@@ -49,7 +58,8 @@ impl PicoState {
 
     pub fn prepare_for_cart_load(&mut self) {
         self.audio.reset();
-        self.rng_state = 1;
+        self.rng_hi = 0xd67ce1e8;
+        self.rng_lo = 0x42cfadf8;
         self.elapsed_time = 0.0;
         self.frame_count = 0;
         self.line_x = 0;

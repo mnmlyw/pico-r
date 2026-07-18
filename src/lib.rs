@@ -71,7 +71,8 @@ struct Snapshot {
     audio_channels: [audio::Channel; audio::NUM_CHANNELS],
     audio_music: audio::MusicState,
     audio_noise_seed: u32,
-    rng_state: u32,
+    rng_hi: u32,
+    rng_lo: u32,
     elapsed_time: f64,
     frame_count: u32,
     target_fps: u8,
@@ -347,7 +348,8 @@ pub extern "C" fn web_save_state() -> u32 {
         audio_channels: engine.state.audio.channels.clone(),
         audio_music: engine.state.audio.music_state.clone(),
         audio_noise_seed: engine.state.audio.noise_seed,
-        rng_state: engine.state.rng_state,
+        rng_hi: engine.state.rng_hi,
+        rng_lo: engine.state.rng_lo,
         elapsed_time: engine.state.elapsed_time,
         frame_count: engine.state.frame_count,
         target_fps: engine.state.target_fps,
@@ -406,7 +408,8 @@ pub unsafe extern "C" fn web_load_state(data_ptr: *const u8, data_len: u32) -> u
         engine.state.audio.channels = snap.audio_channels.clone();
         engine.state.audio.music_state = snap.audio_music.clone();
         engine.state.audio.noise_seed = snap.audio_noise_seed;
-        engine.state.rng_state = snap.rng_state;
+        engine.state.rng_hi = snap.rng_hi;
+        engine.state.rng_lo = snap.rng_lo;
         engine.state.elapsed_time = snap.elapsed_time;
         engine.state.frame_count = snap.frame_count;
         engine.state.target_fps = snap.target_fps;

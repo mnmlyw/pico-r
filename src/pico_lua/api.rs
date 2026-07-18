@@ -514,37 +514,72 @@ fn api_mid(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let z = arg_num(&a, 2).unwrap_or(0.0);
     Ok(vec![num(x.min(y).max(x.max(y).min(z)))])
 }
+// Oracle-confirmed against official PICO-8 (tests/conformance/probes/
+// rng_algorithm.p8, fixed_point_api_granularity.p8): two interleaved 32-bit
+// words (hi/lo), advanced each draw by rotating hi left 16 bits then adding
+// lo (wrapping), with lo then advancing by the *new* hi (also wrapping).
+// srand() reseeds via lo=seed (or 0xdeadbeef if seed==0) with its sign bit
+// cleared, hi=lo^0xbead29ba, then runs the same step 32 times as a warmup.
+fn rng_step(host: &mut PicoState) -> u32 {
+    let old_lo = host.rng_lo;
+    let f = host.rng_hi.rotate_left(16).wrapping_add(old_lo);
+    host.rng_hi = f;
+    host.rng_lo = f.wrapping_add(old_lo);
+    f
+}
 fn api_rnd(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     if let Some(Value::Table(t)) = a.first() {
         let len = t.borrow().raw_len();
         if len == 0 {
             return Ok(vec![nil()]);
         }
-        let r = xorshift(i) % len as u32;
-        let v = t.borrow().get(&num((r + 1) as f64));
+        // Same draw-and-extract as the scalar branch below (n_raw = len),
+        // then floor to an index. NOT oracle-confirmed for the exact
+        // index-selection order -- the scalar rnd(n)/srand(n) algorithm
+        // itself is bit-exact verified, but repeated attempts to pin down
+        // rnd(table)'s precise draw-to-index mapping against official
+        // PICO-8 didn't converge (see LEDGER.md). This stays internally
+        // consistent with the verified generator rather than guessing
+        // further at the mapping.
+        let n_raw = to_fixed(len as f64);
+        let f = rng_step(i.host()) as i32;
+        let result_raw = ((f as u32) % (n_raw as u32)) as i32;
+        let idx = from_fixed(result_raw).floor() as i64 + 1;
+        let v = t.borrow().get(&num(idx as f64));
         return Ok(vec![v]);
     }
     let max = arg_num(&a, 0).unwrap_or(1.0);
-    let r = xorshift(i) as f64 / 4294967296.0;
-    Ok(vec![num(quantize(r * max))])
+    let n_raw = to_fixed(max);
+    if n_raw == 0 {
+        // Confirmed: rnd(0) returns 0 without advancing the RNG state.
+        return Ok(vec![num(0.0)]);
+    }
+    let f = rng_step(i.host()) as i32;
+    let result_raw = if n_raw < 0 {
+        if n_raw <= f && f < 0 {
+            f.wrapping_sub(n_raw)
+        } else {
+            f
+        }
+    } else {
+        ((f as u32) % (n_raw as u32)) as i32
+    };
+    Ok(vec![num(from_fixed(result_raw))])
 }
 fn api_srand(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
-    let s = to_fixed(v) as u32;
-    i.host().rng_state = if s == 0 { 1 } else { s };
-    Ok(vec![])
-}
-fn xorshift(i: &mut Interp) -> u32 {
+    let seed_raw = to_fixed(v) as u32;
     let host = i.host();
-    if host.rng_state == 0 {
-        host.rng_state = 0x12345678;
+    host.rng_lo = if seed_raw == 0 {
+        0xDEADBEEF
+    } else {
+        seed_raw & 0x7FFFFFFF
+    };
+    host.rng_hi = host.rng_lo ^ 0xBEAD29BA;
+    for _ in 0..32 {
+        rng_step(host);
     }
-    let mut s = host.rng_state;
-    s ^= s << 13;
-    s ^= s >> 17;
-    s ^= s << 5;
-    host.rng_state = s;
-    s
+    Ok(vec![])
 }
 fn api_sgn(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
