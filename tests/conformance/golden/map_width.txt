@@ -1,0 +1,4 @@
+RESULT default_write 3
+RESULT beyond_default_width 0
+RESULT width0_wide_write 7
+DONE

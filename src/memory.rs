@@ -37,6 +37,7 @@ pub const ADDR_INPUT_P1: u16 = 0x5F4D;
 // Sprite/screen page registers (high byte of base address)
 pub const ADDR_SPRITE_PAGE: u16 = 0x5F54; // default 0x00 → sprite sheet at 0x0000
 pub const ADDR_SCREEN_PAGE: u16 = 0x5F55; // default 0x60 → screen at 0x6000
+pub const ADDR_MAP_WIDTH: u16 = 0x5F57; // big-map width in cells; 0 means 256, not 0
 
 pub struct Memory {
     pub ram: [u8; RAM_SIZE],
@@ -60,6 +61,10 @@ impl Memory {
         // of 0x6000.
         m.ram[ADDR_SPRITE_PAGE as usize] = 0x00;
         m.ram[ADDR_SCREEN_PAGE as usize] = 0x60;
+        // Confirmed against official PICO-8: a raw 0 in this register means
+        // width 256, not the standard map's 128 — so the default map width
+        // needs an explicit nonzero byte here, not just "leave it zeroed".
+        m.ram[ADDR_MAP_WIDTH as usize] = 128;
         m
     }
 
@@ -98,6 +103,7 @@ impl Memory {
         // Sprite/screen page defaults: sprite reads from 0x0000, draws go to 0x6000.
         self.ram[ADDR_SPRITE_PAGE as usize] = 0x00;
         self.ram[ADDR_SCREEN_PAGE as usize] = 0x60;
+        self.ram[ADDR_MAP_WIDTH as usize] = 128;
     }
 
     pub fn save_rom(&mut self) {

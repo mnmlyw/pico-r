@@ -465,10 +465,13 @@ pub fn map(
     cel_h: i32,
     layer: i32,
 ) {
-    let map_w = if memory.ram[0x5F57] == 0 {
-        128
+    // Confirmed against official PICO-8: a raw 0 here means width 256, not
+    // 128 (Memory::new/init_draw_state set the default byte to 128 so a
+    // fresh cart still gets the normal 128-wide map).
+    let map_w = if memory.ram[memory::ADDR_MAP_WIDTH as usize] == 0 {
+        256
     } else {
-        memory.ram[0x5F57] as i32
+        memory.ram[memory::ADDR_MAP_WIDTH as usize] as i32
     };
     for cy in 0..cel_h {
         for cx in 0..cel_w {
@@ -505,10 +508,13 @@ pub fn map(
 }
 
 pub fn map_get_wide(memory: &Memory, x: i32, y: i32) -> u8 {
-    let map_w = if memory.ram[0x5F57] == 0 {
-        128
+    // Confirmed against official PICO-8: a raw 0 here means width 256, not
+    // 128 (Memory::new/init_draw_state set the default byte to 128 so a
+    // fresh cart still gets the normal 128-wide map).
+    let map_w = if memory.ram[memory::ADDR_MAP_WIDTH as usize] == 0 {
+        256
     } else {
-        memory.ram[0x5F57] as i32
+        memory.ram[memory::ADDR_MAP_WIDTH as usize] as i32
     };
     if x < 0 || x >= map_w || !(0..64).contains(&y) {
         return 0;
@@ -523,10 +529,13 @@ pub fn map_get_wide(memory: &Memory, x: i32, y: i32) -> u8 {
 }
 
 pub fn map_set_wide(memory: &mut Memory, x: i32, y: i32, val: u8) {
-    let map_w = if memory.ram[0x5F57] == 0 {
-        128
+    // Confirmed against official PICO-8: a raw 0 here means width 256, not
+    // 128 (Memory::new/init_draw_state set the default byte to 128 so a
+    // fresh cart still gets the normal 128-wide map).
+    let map_w = if memory.ram[memory::ADDR_MAP_WIDTH as usize] == 0 {
+        256
     } else {
-        memory.ram[0x5F57] as i32
+        memory.ram[memory::ADDR_MAP_WIDTH as usize] as i32
     };
     if x < 0 || x >= map_w || !(0..64).contains(&y) {
         return;
