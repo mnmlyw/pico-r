@@ -1,0 +1,8 @@
+RESULT cstore_protected 0
+RESULT cstore_partial_b0 21
+RESULT cstore_partial_b1 22
+RESULT cstore_partial_b2 0
+RESULT cstore_partial_b3 0
+RESULT peek_neg_half 7
+RESULT peek_neg1 7
+DONE

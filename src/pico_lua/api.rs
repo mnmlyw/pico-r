@@ -75,6 +75,21 @@ fn safe_to_i32(f: f64) -> i32 {
     f as i32
 }
 
+// Memory addresses use flr() semantics (floor toward -infinity), not
+// truncate-toward-zero: confirmed against official PICO-8 that
+// peek(-0.5) reads the same byte as peek(-1) (both wrap to 0xffff), not
+// address 0 (which is what `as i32` truncation would give for -0.5).
+// Scoped to address arguments specifically -- not applied to arg_int
+// generally, since that's used pervasively for unrelated arguments this
+// hasn't been verified for.
+fn arg_addr(args: &[Value], i: usize) -> u16 {
+    let f = arg_num(args, i).unwrap_or(0.0);
+    if f.is_nan() {
+        return 0;
+    }
+    safe_to_i32(f.floor()) as u16
+}
+
 fn to_fixed(v: f64) -> i32 {
     let scaled = v * 65536.0;
     if scaled.is_nan() {
@@ -1515,7 +1530,7 @@ fn api_btnp(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 // === Memory ===
 
 fn api_peek(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let addr = arg_int(&a, 0).unwrap_or(0) as u16;
+    let addr = arg_addr(&a, 0);
     let n = opt_int(&a, 1, 1).max(1) as usize;
     if n == 1 {
         return Ok(vec![num(i.host().memory.peek(addr) as f64)]);
@@ -1528,7 +1543,7 @@ fn api_peek(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(out)
 }
 fn api_poke(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let addr = arg_int(&a, 0).unwrap_or(0) as u16;
+    let addr = arg_addr(&a, 0);
     for (k, v) in a.iter().enumerate().skip(1) {
         let val = (v.as_number().unwrap_or(0.0) as i32 & 0xFF) as u8;
         i.host().memory.poke(addr.wrapping_add((k - 1) as u16), val);
@@ -1536,23 +1551,23 @@ fn api_poke(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![])
 }
 fn api_peek2(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let addr = arg_int(&a, 0).unwrap_or(0) as u16;
+    let addr = arg_addr(&a, 0);
     Ok(vec![num(i.host().memory.peek16(addr) as f64)])
 }
 fn api_poke2(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let addr = arg_int(&a, 0).unwrap_or(0) as u16;
+    let addr = arg_addr(&a, 0);
     let val = (safe_to_i32(arg_num(&a, 1).unwrap_or(0.0)) as u32 & 0xFFFF) as u16;
     i.host().memory.poke16(addr, val);
     Ok(vec![])
 }
 fn api_peek4(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let addr = arg_int(&a, 0).unwrap_or(0) as u16;
+    let addr = arg_addr(&a, 0);
     let raw = i.host().memory.peek32(addr);
     let fixed = raw as i32;
     Ok(vec![num(fixed as f64 / 65536.0)])
 }
 fn api_poke4(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let addr = arg_int(&a, 0).unwrap_or(0) as u16;
+    let addr = arg_addr(&a, 0);
     let v = arg_num(&a, 1).unwrap_or(0.0);
     let scaled = v * 65536.0;
     let fixed = if scaled >= i32::MAX as f64 {
@@ -1567,15 +1582,15 @@ fn api_poke4(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 fn api_memcpy(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     i.host().memory.memcpy(
-        arg_int(&a, 0).unwrap_or(0) as u16,
-        arg_int(&a, 1).unwrap_or(0) as u16,
+        arg_addr(&a, 0),
+        arg_addr(&a, 1),
         arg_int(&a, 2).unwrap_or(0) as u16,
     );
     Ok(vec![])
 }
 fn api_memset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     i.host().memory.memset(
-        arg_int(&a, 0).unwrap_or(0) as u16,
+        arg_addr(&a, 0),
         (arg_int(&a, 1).unwrap_or(0) & 0xFF) as u8,
         arg_int(&a, 2).unwrap_or(0) as u16,
     );
@@ -1618,7 +1633,15 @@ fn api_cstore(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     };
     let st = i.host();
     for k in 0..len {
-        st.memory.rom[dst.wrapping_add(k) as usize] = st.memory.ram[src.wrapping_add(k) as usize];
+        let dst_addr = dst.wrapping_add(k);
+        // Confirmed against official PICO-8: cstore silently skips writes
+        // at/beyond 0x4300 (the compiled-code region) instead of erroring
+        // or writing through -- verified with a destination range that
+        // straddles the boundary, where only the below-0x4300 bytes land.
+        if dst_addr >= mem::ADDR_GENERAL {
+            continue;
+        }
+        st.memory.rom[dst_addr as usize] = st.memory.ram[src.wrapping_add(k) as usize];
     }
     Ok(vec![])
 }
