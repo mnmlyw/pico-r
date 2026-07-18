@@ -12,14 +12,16 @@ To get a cart to try, download [Celeste Classic](https://www.lexaloffle.com/bbs/
 
 A complete PICO-8 runtime implemented in safe Rust as a single ~360 KB WebAssembly module:
 
-- **Cart loading** — `.p8` text format and `.p8.png` (manual PNG decoder, steganographic byte extraction, PXA + old compression)
-- **Preprocessor** — transforms PICO-8's Lua dialect (short-if/while, compound assignment incl. `^=`, `!=`, peek shortcuts `@`/`%`/`$`, binary literals, bitwise ops `>>`/`<<`/`<<>`/`>>>`/`>><`/`^^`, integer division `\`, `?` print, P8SCII glyph-to-button-ID) to standard Lua 5.2
-- **Hand-rolled Lua VM** — purpose-built lexer + parser + tree-walking interpreter. No piccolo or other Lua VM dependency. Tables with metatables, closures, upvalues, varargs, multi-return, full control flow including `goto`/labels and `repeat..until` with proper body-scope condition evaluation
-- **Graphics** — pset/line/rect/circ (incl. inverted fill)/oval/spr/sspr/map/tline/print with full P8SCII control codes, pal, fillp, clip, camera
+- **Cart loading** — `.p8` text format and `.p8.png` (manual PNG decoder, steganographic byte extraction, PXA + old compression); the PNG ROM image is loaded byte-verbatim into RAM (verified against the official binary's own `reload()` of the same file)
+- **Preprocessor** — transforms PICO-8's Lua dialect (short-if/while, compound assignment incl. `^=`, `!=`, peek shortcuts `@`/`%`/`$`, binary literals, bitwise ops `>>`/`<<`/`<<>`/`>>>`/`>><`/`^^`, integer division `\`, `?` print, P8SCII glyph identifiers and glyph-to-button-ID) to standard Lua 5.2, operating on raw bytes end-to-end so high-byte glyphs survive as identifier characters
+- **Hand-rolled Lua VM** — purpose-built lexer + parser + tree-walking interpreter. No piccolo or other Lua VM dependency. Tables with metatables and insertion-ordered storage, closures, upvalues, varargs, multi-return, real `local _ENV` scoping, `goto`/labels, `repeat..until` with proper body-scope condition evaluation, and coroutines (native builds; the wasm build has no threads and compiles them out)
+- **Bit-exact numbers** — true 16.16 fixed-point quantization on literals and arithmetic, PICO-8's actual `rnd()`/`srand()` PRNG algorithm, and z8lua's `sin`/`cos`/`atan2` lookup tables, all locked to the official binary's output
+- **Graphics** — pset/line/rect/circ (incl. inverted fill)/oval/spr/sspr/map/print with full P8SCII control codes, pal, fillp, clip, camera (`tline` is currently a parse-but-draw-nothing stub)
 - **Audio** — 4-channel waveform synthesis at 22050 Hz (8 waveforms + custom instruments via child SFX), all 8 SFX effects (slide, vibrato, drop, fade in/out, arpeggio fast/slow), music pattern sequencing with fade
-- **Memory** — flat 65536-byte RAM matching PICO-8 layout (sprites, map, SFX, draw state, screen)
+- **Memory** — flat 65536-byte RAM matching PICO-8 layout (sprites, map, SFX, draw state, screen, big-map region at 0x8000+ incl. the 0x5F56/0x5F57 custom map registers)
+- **Multi-cart** — real `load()` cart switching with breadcrumb return via `extcmd("breadcrumb")`, external-file `reload()`, and high-RAM (0x8000+) persistence across switches — enough to run BBS games that stage data through a companion cart
 - **Input** — keyboard via DOM events; `btn`/`btnp` with PICO-8's repeat-config respect from RAM 0x5F5C/0x5F5D
-- **Sandbox** — Lua stdlib subset matching PICO-8 (no `io`, `os`, `debug`, `package`, `require`)
+- **Sandbox** — Lua stdlib subset matching PICO-8 (no `io`, `os`, `debug`, `package`, `require` — and, matching the real console, no `string` library either; string indexing `s[i]`, `split`, `sub`, `chr`, `ord` are the PICO-8 way). The shell commands (`help`, `ls`, `save`, `run`, ...) exist as callable globals just like on the official console
 - **Save/Load** — press **P** to save, **L** to load. Same-session is lossless (deep-clones the Lua globals tree, preserves closures stored in tables, audio channels, RNG); cross-session falls back to byte serialization with the closures-in-tables limitation
 
 ## Build
@@ -44,23 +46,24 @@ python3 -m http.server -d web 8765
 
 | Module | Lines | Purpose |
 |---|---|---|
-| `memory.rs` | 214 | 65536-byte RAM/ROM, screen/sprite/map indexing |
-| `palette.rs` | 22 | 32-color ARGB palette (16 standard + 16 extended) |
-| `cart.rs` | 609 | `.p8` section parser + `.p8.png` PNG decoder + PXA decompression |
-| `preprocessor.rs` | 1367 | Line-by-line PICO-8 → Lua 5.2 transform |
-| `gfx.rs` + `gfx_font.rs` | 785 | Drawing primitives, sprite blitting, P8SCII font rendering |
-| `audio.rs` | 656 | 4-channel synthesis, returned to JS as f32 samples |
-| `input.rs` | 74 | btn state + held-frame counters for btnp repeat |
-| `state.rs` | 53 | Top-level `PicoState` aggregating engine state |
-| `pico_lua/lex.rs` | 280 | Lua 5.2 tokenizer |
-| `pico_lua/ast.rs` | 60 | AST node types |
-| `pico_lua/parse.rs` | 290 | Recursive-descent parser |
-| `pico_lua/value.rs` | 220 | Value enum, Table with array+hash, deep-clone helpers |
-| `pico_lua/interp.rs` | 470 | Tree-walking evaluator |
-| `pico_lua/api.rs` | 870 | ~80 PICO-8 API functions registered as native callbacks |
-| `pico_lua/serialize.rs` | 165 | Tagged binary save/load for Lua globals |
-| `pico_lua/mod.rs` | 130 | LuaEngine trait impl, env-fallback shim |
-| `lib.rs` | 285 | WASM exports, frame loop, in-memory snapshot |
+| `memory.rs` | 278 | 65536-byte RAM/ROM, screen/sprite/map indexing |
+| `palette.rs` | 21 | 32-color ARGB palette (16 standard + 16 extended) |
+| `cart.rs` | 598 | `.p8` section parser + `.p8.png` PNG decoder + PXA decompression |
+| `preprocessor.rs` | 1972 | Byte-level PICO-8 → Lua 5.2 transform |
+| `gfx.rs` + `gfx_font.rs` | 1015 | Drawing primitives, sprite blitting, P8SCII font rendering |
+| `audio.rs` | 708 | 4-channel synthesis, returned to JS as f32 samples |
+| `input.rs` | 88 | btn state + held-frame counters for btnp repeat |
+| `state.rs` | 110 | Top-level `PicoState` aggregating engine state |
+| `pico_lua/lex.rs` | 687 | Lua 5.2 tokenizer (raw bytes; high-byte glyphs are identifier chars) |
+| `pico_lua/ast.rs` | 85 | AST node types |
+| `pico_lua/parse.rs` | 564 | Recursive-descent parser |
+| `pico_lua/value.rs` | 577 | Value enum, insertion-ordered Table, deep-clone helpers |
+| `pico_lua/interp.rs` | 1002 | Tree-walking evaluator (`_ENV` scoping, metamethods, CPU-budget accounting) |
+| `pico_lua/api.rs` | 2364 | ~100 PICO-8 API functions registered as native callbacks |
+| `pico_lua/coroutine.rs` | 198 | Coroutines via baton-passing OS threads (native only) |
+| `pico_lua/serialize.rs` | 269 | Tagged binary save/load for Lua globals |
+| `pico_lua/mod.rs` | 292 | LuaEngine trait impl |
+| `lib.rs` | 461 | WASM exports, frame loop, in-memory snapshot |
 | `web/index.html` | — | Drop-in cart loader, keyboard input, audio resampler, save UI |
 
 The output is a single self-contained `.wasm` with **zero JS imports** — Rust's `dlmalloc` is the global allocator, all I/O goes through explicit exports.
@@ -108,18 +111,34 @@ Loads a cart, simulates pressing X for the first 8 frames (to advance past the t
 UPDATE ERROR (frame 81): cart:2032 in _update: compare nil with number
 ```
 
-This is how the `repeat..until`-scope and broken-`all()`-iterator bugs were diagnosed during development.
+This is how the `repeat..until`-scope and broken-`all()`-iterator bugs were diagnosed during development. If a cart hangs instead of erroring, `PICOR_TRACE=1` logs the executing line/depth periodically, and `PICOR_LUA_OVERRIDE=/path/to/alt.lua` runs alternate Lua source against the cart's real ROM data (useful for instrumenting a cart's own code with `printh` probes).
 
-A sibling `cargo run --bin dump-pp --release -- /path/to/cart.p8.png [output.lua]` writes the preprocessed Lua source so you can `sed -n '2030,2040p' output.lua` and see the actual code at the failing line.
+Sibling dump tools write a cart's Lua source to a file: `dump-pp` emits the preprocessed Lua 5.2 (so you can see the actual code at a failing line) and `dump-raw` the original PICO-8-dialect source:
+
+```bash
+cargo run --bin dump-pp --release -- /path/to/cart.p8.png output.lua
+cargo run --bin dump-raw --release -- /path/to/cart.p8.png output.lua
+```
+
+## Conformance testing
+
+Engine behavior is locked to the **official PICO-8 binary as an empirical oracle**, not to documentation or folklore. `tests/conformance/` holds 70+ probe carts (`probes/*.p8`), each exercising one behavior — fixed-point overflow, `pairs()` ordering, string indexing, P8SCII escapes, trig table boundaries, `next()` over object keys, ... — with golden outputs (`golden/*.txt`) captured by running the probe on the real console:
+
+```bash
+tools/oracle.sh tests/conformance/probes/<name>.p8   # (re)generate a golden on a machine with PICO-8
+cargo test --test conformance                        # every probe must match its golden byte-for-byte
+```
+
+Goldens are checked in, so CI and contributors never need the PICO-8 binary. `tests/conformance/LEDGER.md` is the running log of every divergence found and fixed, with the evidence for each.
 
 ## Compatibility
 
-Tested with [Celeste Classic 2](https://www.lexaloffle.com/bbs/?tid=41339) and other community carts.
+Measured against a corpus of **188 BBS carts**: **187 run clean; the remaining 1 fails identically on the official binary** (it's listed in `tests/conformance/broken_on_official.txt`, where an error exit *is* the conformant outcome). That includes heavyweights like embedded LISP VMs, LZW self-decompressors, multi-cart loaders, and coroutine-driven frame loops.
 
 **Known limitations:**
-- **No coroutines.** Carts using `flip()` / `cocreate` / `coresume` / `yield` for their own frame loop won't work. Carts using the standard `_init`/`_update`/`_draw` lifecycle (the dominant pattern) run fine.
-- **Numbers are f64, not bit-exact 16:16 fixed-point.** Pure-arithmetic carts won't notice; carts that rely on overflow tricks at exactly ±32768 or specific `tostr(n, 0x1)` hex formats may misbehave at edges.
-- **`string.find`/`match`/`gmatch`/`gsub`** not implemented — rare in PICO-8 carts; `split`/`sub`/`chr`/`ord` cover most cases.
+- **`tline()` draws nothing** — parsed and callable, but its raster algorithm hasn't been oracle-verified yet, so it's a deliberate no-op rather than a wrong guess.
+- **No coroutines on the WASM build** (no threads there; native builds have them via OS threads).
+- **Frame pacing** — `_set_fps()` and `menuitem()` are accepted but inert; the host drives the frame rate.
 - **Cross-session save/load drops closures stored in tables** (the same-session in-memory snapshot path preserves them).
 
 ## Credits
