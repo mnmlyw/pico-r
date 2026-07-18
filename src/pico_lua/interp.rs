@@ -251,10 +251,29 @@ impl Interp {
     }
 
     fn execute_statement(&mut self, stat: &Stat) -> Result<Flow, RtError> {
+        self.instruction_budget = self.instruction_budget.wrapping_add(1);
+        // Official PICO-8 auto-flips when a frame's CPU budget is
+        // exhausted -- that's why infinite top-level loops still render on
+        // real hardware instead of hanging the console. Model it: every
+        // ~1M statements (a generous per-frame budget for this
+        // tree-walker) counts as one synthetic frame against the host's
+        // flip budget, so a headless run of a CPU-bound forever-loop cart
+        // (bytebeat_tweet-0.p8.png's goto music toy) ends as "ran N
+        // frames worth of CPU" instead of tripping the watchdog. Inactive
+        // when the host sets no flip budget (interactive/WASM).
+        if self.instruction_budget.is_multiple_of(1_000_000) && !self.host.is_null() {
+            let st = self.host();
+            if st.flip_limit != 0 {
+                st.flip_count += 1;
+                st.frame_count += 1;
+                if st.flip_count > st.flip_limit {
+                    return Err(RtError::msg(super::api::FLIP_LIMIT_MARKER));
+                }
+            }
+        }
         // Opt-in hang locator: with PICOR_TRACE=1, periodically report the
         // most recently visited source line so an infinite loop can be
         // found without a debugger.
-        self.instruction_budget = self.instruction_budget.wrapping_add(1);
         if self.instruction_budget.is_multiple_of(20_000_000) {
             static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
             if *TRACE.get_or_init(|| std::env::var_os("PICOR_TRACE").is_some()) {

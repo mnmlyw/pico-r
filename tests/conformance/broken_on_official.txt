@@ -1,0 +1,11 @@
+# Carts that FAIL IDENTICALLY on the official PICO-8 binary (verified by
+# running the official binary headlessly on the same cart file). For these,
+# an error exit is the CONFORMANT outcome -- a clean run would be a
+# conformance bug. The sweep counts exit code 2 (load error) as conformant
+# for carts listed here.
+#
+# basicshmupdc1-0: opens a `--[[` long comment at source line ~335 that is
+# never closed; official reports "unfinished long comment near <eof>"
+# (syntax error line 175 tab 2). pico-r reports a parse error at the same
+# structural point.
+basicshmupdc1-0.p8.png
