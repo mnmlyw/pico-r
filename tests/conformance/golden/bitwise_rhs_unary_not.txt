@@ -1,0 +1,3 @@
+RESULT band_unary_not 4
+RESULT bor_unary_not -2
+DONE

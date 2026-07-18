@@ -174,7 +174,18 @@ pub fn number_to_str(n: f64) -> String {
     }
     // PICO-8 numbers are 16.16 fixed point, displayed rounded to 4 decimal
     // digits with trailing zeros stripped (confirmed against official
-    // PICO-8: e.g. 1/3 -> "0.3333", 2.99998 -> "3").
+    // PICO-8: e.g. 1/3 -> "0.3333", 2.99998 -> "3"). A small-magnitude
+    // float that rounds to "0.0000" at this display precision shows "0",
+    // not "-0" -- confirmed against official PICO-8 (`-0.00001` -> "0").
+    // Note this collapse is technically over-broad: official PICO-8
+    // genuinely prints "-0" for a handful of values that reach exactly the
+    // smallest representable negative fixed-point increment via bit
+    // manipulation (e.g. `bnot(0)`), which would need real 16.16
+    // quantization of every literal/arithmetic result (a known, deferred
+    // architectural gap -- see LEDGER.md) to distinguish correctly from an
+    // ordinary tiny float like `-0.00001` that real hardware collapses to
+    // exact zero at parse time. Until then this collapses both alike,
+    // matching the far more common ordinary-tiny-float case.
     let mut s = format!("{:.4}", n);
     while s.ends_with('0') {
         s.pop();

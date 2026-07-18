@@ -1345,8 +1345,18 @@ fn extract_bitwise_rhs(line: &[u8], start: usize) -> ExprResult<'_> {
         if depth == 0 {
             if matches!(
                 ch,
-                b',' | b';' | b' ' | b'\t' | b'>' | b'<' | b'=' | b'~' | b'&' | b'|' | b'}' | b'{'
+                b',' | b';' | b' ' | b'\t' | b'>' | b'<' | b'=' | b'&' | b'|' | b'}' | b'{'
             ) {
+                break;
+            }
+            // `~` alone is the unary bitwise-NOT prefix (`~x` -> `bnot(x)`)
+            // and is valid RHS content -- only `~=` (inequality) is a real
+            // stop. Treating a bare `~` as an unconditional stop left it
+            // matching nothing (`x & ~y` has `~` as literally the first
+            // character after skipping whitespace), producing an empty RHS
+            // and leaving the whole `&` unconverted. Confirmed on a real
+            // corpus cart (donsol8_v1-14.p8.png: `mouseb & ~mouseb_last`).
+            if ch == b'~' && i + 1 < line.len() && line[i + 1] == b'=' {
                 break;
             }
             if ch == b'^' && i + 1 < line.len() && line[i + 1] == b'^' {
