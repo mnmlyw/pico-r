@@ -252,6 +252,8 @@ pub fn register_all(globals: &Rc<Table>) {
     set("menuitem", api_menuitem);
     set("extcmd", api_extcmd);
     set("flip", api_flip);
+    set("_set_fps", api_set_fps);
+    set("serial", api_serial);
     set("reset", api_reset);
     set("stop", api_stop);
 }
@@ -1814,6 +1816,24 @@ fn api_menuitem(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> 
     Ok(vec![])
 }
 fn api_extcmd(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    Ok(vec![])
+}
+// `_set_fps(n)` overrides the target frame rate to an arbitrary value
+// rather than the usual 30/60 toggle -- confirmed real via oracle (doesn't
+// error), but its effect on `stat(7)` couldn't be pinned down (a probe
+// calling `_set_fps(45)` still reported `stat(7)` as 30 every frame, so
+// whatever it changes isn't reflected there). Stubbed as a no-op like the
+// other host-integration functions above: this engine's frame loop doesn't
+// do real-time pacing at all (run-cart/lib.rs just step a fixed number of
+// frames), so the only observable requirement is "don't crash calling it".
+fn api_set_fps(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    Ok(vec![])
+}
+// `serial(addr, len, channel)` -- host GPIO/serial data export, confirmed
+// a real (if obscure) API function via oracle. Stubbed as a no-op: it has
+// no meaningful effect without an actual host-side serial/file channel to
+// write to, which this engine doesn't implement.
+fn api_serial(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![])
 }
 fn api_flip(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
