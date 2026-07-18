@@ -997,7 +997,22 @@ fn extract_rhs(line: &[u8], start: usize) -> RhsResult<'_> {
             let prev = line[i - 1];
             let prev_is_value =
                 prev.is_ascii_alphanumeric() || prev == b'_' || prev == b')' || prev == b']';
-            if prev_is_value {
+            // If the word ending here is itself `and`/`or`/`not`, this
+            // space separates the operator from its right-hand operand,
+            // not two statements -- e.g. `axis=="x" and ox or oy` must
+            // not be cut right after `and`. Confirmed against a real
+            // corpus cart (celesteprogrupter-2.p8.png) where `obj.rem
+            // [axis]+=axis=="x" and ox or oy` was splitting into
+            // `obj.rem[axis]+(axis=="x" and)` with `ox or oy` left
+            // dangling outside.
+            let mut word_start = i;
+            while word_start > rhs_start
+                && (line[word_start - 1].is_ascii_alphanumeric() || line[word_start - 1] == b'_')
+            {
+                word_start -= 1;
+            }
+            let prev_word_is_operator_keyword = is_operator_keyword(line, word_start);
+            if prev_is_value && !prev_word_is_operator_keyword {
                 let mut peek = i;
                 while peek < line.len() && (line[peek] == b' ' || line[peek] == b'\t') {
                     peek += 1;
