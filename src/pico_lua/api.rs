@@ -724,6 +724,13 @@ fn api_tonum(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         return Ok(vec![num(from_fixed(raw))]);
     }
 
+    // Booleans convert: tonum(true)==1, tonum(false)==0 -- confirmed
+    // against official PICO-8 (carts use `tonum(btn"1")-tonum(btn"0")`
+    // for directional input, e.g. deepening-0.p8.png).
+    if let Value::Bool(b) = v {
+        return Ok(vec![num(if b { 1.0 } else { 0.0 })]);
+    }
+
     Ok(vec![match v.as_number() {
         Some(n) => num(n),
         None => fail(flags),

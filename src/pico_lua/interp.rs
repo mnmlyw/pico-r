@@ -799,6 +799,15 @@ impl Interp {
         c: &Rc<LuaClosure>,
         mut args: Vec<Value>,
     ) -> Result<Vec<Value>, RtError> {
+        // Runaway recursion must surface as a catchable runtime error --
+        // official PICO-8 reports "out of memory" (verified with an
+        // infinitely self-recursing probe). Without a cap, each Lua call
+        // level consumes native stack in this tree-walking interpreter and
+        // deep recursion aborts the whole host process with a fatal stack
+        // overflow (SIGABRT) instead of a cart error.
+        if self.frames.len() >= 1000 {
+            return Err(RtError::msg("out of memory"));
+        }
         let body = Rc::clone(&c.body);
         let mut frame = Frame {
             locals: Vec::new(),

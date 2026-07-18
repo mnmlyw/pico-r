@@ -1,0 +1,5 @@
+RESULT band_neq ok
+RESULT spaced_modulo ok
+RESULT multiline_cond match
+RESULT tonum_bools 1 0
+DONE

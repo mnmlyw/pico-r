@@ -178,7 +178,15 @@ fn insert_number_spaces(source: &[u8]) -> Vec<u8> {
                 }
             }
             result.extend_from_slice(&source[i..end]);
-            if end < source.len() && (source[end].is_ascii_alphabetic() || source[end] == b'_') {
+            // High-byte P8SCII glyphs are identifier characters in PICO-8
+            // (they expand to synthetic `_p8_XX` names later), so a number
+            // glued to one (`-2<glyph>.y-=8`, redash-7.p8.png) needs the
+            // same separating space as a number glued to an ASCII letter --
+            // otherwise the digit fuses into the glyph's expanded
+            // identifier downstream.
+            if end < source.len()
+                && (source[end].is_ascii_alphabetic() || source[end] == b'_' || source[end] >= 0x80)
+            {
                 result.push(b' ');
             }
             i = end;
@@ -189,7 +197,7 @@ fn insert_number_spaces(source: &[u8]) -> Vec<u8> {
             result.push(ch);
             i += 1;
             let next = source[i];
-            if next.is_ascii_alphabetic() || next == b'_' {
+            if next.is_ascii_alphabetic() || next == b'_' || next >= 0x80 {
                 result.push(b' ');
             }
             continue;
@@ -528,10 +536,55 @@ fn process_line(
 }
 
 fn is_prev_value(line: &[u8], pos: usize) -> bool {
-    if pos == 0 {
+    // Lua is whitespace-insensitive between tokens, so `timer %2` is
+    // modulo exactly like `timer%2` -- skip spaces/tabs backward before
+    // classifying, or the space made `%` look like the peek2-shortcut
+    // (`timer peek2(2)`). Confirmed on a real corpus cart
+    // (deepening-0.p8.png: `if timer %2==0 then`).
+    let mut p = pos;
+    while p > 0 && (line[p - 1] == b' ' || line[p - 1] == b'\t') {
+        p -= 1;
+    }
+    if p == 0 {
         return false;
     }
-    let prev = line[pos - 1];
+    let prev = line[p - 1];
+    // A keyword is not a value even though it ends in identifier
+    // characters -- `return %addr` must classify `%` as the peek2
+    // shortcut, not modulo on the "value" `return`. (`true`/`false`/`nil`
+    // ARE value keywords and stay value-like.) Confirmed on a real corpus
+    // cart (pizza_panda-1.p8.png: `then return %addr,...`).
+    if prev.is_ascii_alphanumeric() || prev == b'_' {
+        let mut ws = p;
+        while ws > 0 && (line[ws - 1].is_ascii_alphanumeric() || line[ws - 1] == b'_') {
+            ws -= 1;
+        }
+        const NONVALUE_KEYWORDS: &[&[u8]] = &[
+            b"and",
+            b"break",
+            b"do",
+            b"else",
+            b"elseif",
+            b"end",
+            b"for",
+            b"function",
+            b"goto",
+            b"if",
+            b"in",
+            b"local",
+            b"not",
+            b"or",
+            b"repeat",
+            b"return",
+            b"then",
+            b"until",
+            b"while",
+        ];
+        if NONVALUE_KEYWORDS.contains(&&line[ws..p]) {
+            return false;
+        }
+        return true;
+    }
     // A high-byte P8SCII glyph expands to a synthetic `_p8_XX` identifier
     // (see the `ch >= 0x80` handling in `process_line`), so it counts as
     // value-like context too -- otherwise a glyph directly followed by `%`
@@ -539,7 +592,7 @@ fn is_prev_value(line: &[u8], pos: usize) -> bool {
     // byte isn't ASCII-alphanumeric, even though the identifier it expands
     // to clearly is a value). Confirmed against a real corpus cart
     // (batazubipe-0.p8.png: a glyph directly followed by `%40`).
-    prev.is_ascii_alphanumeric() || prev == b'_' || prev == b')' || prev == b']' || prev >= 0x80
+    prev == b')' || prev == b']' || prev >= 0x80
 }
 
 fn parse_binary_literal(s: &[u8]) -> f64 {
@@ -961,17 +1014,22 @@ fn is_continuation_body(rest: &[u8]) -> bool {
             }
         }
     }
-    // A body that's nothing but a dangling binary operator (e.g.
-    // `if(a)==` continuing on the next line with `(b) then`) can never
-    // be a complete short-if statement by itself -- confirmed against a
-    // real corpus cart (balloon-1.p8.png) where this was misexpanded
-    // into `if a then == end`, swallowing the real condition/then that
-    // followed on the next line.
+    // A body that STARTS with a binary operator (with or without a right
+    // operand following on the same line) can never be a valid statement
+    // -- no Lua statement begins with one -- so the parenthesized prefix
+    // must be a multi-line condition whose real `then` is on a later line.
+    // Two confirmed real corpus shapes: the operator alone at end of line
+    // (`if(a)==` / next line `(b) then`, balloon-1.p8.png) and the
+    // operator with its operand but the condition still continuing
+    // (`if (abs(en.x-64))>80` / next line `or ... then`,
+    // deepening-0.p8.png).
     const DANGLING_OPS: &[&[u8]] = &[
         b"==", b"~=", b"<=", b">=", b"..", b"<", b">", b"+", b"-", b"*", b"/", b"%", b"^",
     ];
-    if DANGLING_OPS.contains(&trimmed) {
-        return true;
+    for op in DANGLING_OPS {
+        if trimmed.starts_with(op) {
+            return true;
+        }
     }
     false
 }
@@ -1394,6 +1452,7 @@ fn extract_simple_expr(line: &[u8], start: usize) -> ExprResult<'_> {
                     | b'{'
                     | b'&'
                     | b'|'
+                    | b'!'
             ) {
                 break;
             }
@@ -1476,9 +1535,13 @@ fn extract_bitwise_rhs(line: &[u8], start: usize) -> ExprResult<'_> {
             break;
         }
         if depth == 0 {
+            // `!` only ever occurs as the `!=` comparison in the PICO-8
+            // dialect -- a hard stop, or `btn()&15!=x` captures `15!` into
+            // the rewritten band() and the comparison never converts.
+            // Confirmed on a real corpus cart (deepening-0.p8.png).
             if matches!(
                 ch,
-                b',' | b';' | b' ' | b'\t' | b'>' | b'<' | b'=' | b'&' | b'|' | b'}' | b'{'
+                b',' | b';' | b' ' | b'\t' | b'>' | b'<' | b'=' | b'&' | b'|' | b'}' | b'{' | b'!'
             ) {
                 break;
             }
