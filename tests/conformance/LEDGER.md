@@ -409,3 +409,11 @@ Corpus re-sweep: **183/188 clean** (up from 182) — **zero regressions**. One f
 - `praxis_fighter_x-2.p8.png`, `redash-7.p8.png` — both fail inside cart-embedded LZW-style decompressors whose bit arithmetic relies on 16.16 overflow behavior (`2^n` for n≥15 saturates at 32767.99998 on real hardware and feeds `%`-masks; full-precision f64 gives entirely different values). **Blocked on the exact-fixed-point epic running in the parallel session.**
 - `samurise-1.p8.png` — infinite loop inside its embedded `parens8` LISP VM (`_update60`, cart line 141): ruled out slowness with a 280-second run (~80M statements, single line, no progress). The specific interpreter-semantics divergence feeding the VM's dispatch loop is not yet located.
 - `bytebeat_tweet-0.p8.png` — paces its generator loop on `stat(108)` (serial audio queue) *draining in real time as audio plays*; a headless fixed-frame run has no analogue for that. The queue counter itself is implemented and oracle-locked.
+
+### Follow-up: pushing toward 100% clean — all() iterates strings (round 35)
+
+Located `samurise-1.p8.png`'s infinite loop with the upgraded PICOR_TRACE (statement-kind + call-depth): a single `_ppos+=1` assignment spinning inside its embedded `parens8` LISP VM's scanner, `while(function()for e in all(e)do ... end end)()==n do _ppos+=1 end`, where `e` is the STRING `" \n\t"`.
+
+- **`all()` over a string iterates its characters as 1-char strings — implemented, oracle-confirmed** (`for c in all("abc")` yields a,b,c on real hardware; ours returned an empty iterator, so the scanner's char-set test never matched and `nil==nil` kept the advance loop alive forever). | `src/pico_lua/api.rs` (`api_all`)
+
+Corpus re-sweep: **183/188 clean** (unchanged) — **zero regressions**; `samurise-1.p8.png` progressed from the infinite TIMEOUT to a locatable LOAD_ERROR deeper in the VM's compile stage (`attempt to index a nil value (key 2)`), still under investigation.

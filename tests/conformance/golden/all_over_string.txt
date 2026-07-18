@@ -1,0 +1,4 @@
+RESULT all_str a,b,c,
+RESULT all_empty 0
+RESULT s0 [nil]
+DONE

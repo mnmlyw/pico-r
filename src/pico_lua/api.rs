@@ -1079,6 +1079,25 @@ fn api_foreach(i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> 
 }
 
 fn api_all(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    // all() over a STRING iterates its characters as 1-char strings --
+    // confirmed via oracle (`for c in all("abc")`); samurise-1.p8.png's
+    // embedded parens8 LISP VM tokenizes with `for e in all(" \n\t")`,
+    // and an empty iterator here spun its scanner loop forever.
+    if let Some(Value::Str(s)) = args.first() {
+        let s = Rc::clone(s);
+        let pos = std::cell::Cell::new(0usize);
+        return Ok(vec![Value::Function(Function::Native(Rc::new(NativeFn {
+            name: "all_str",
+            func: Box::new(move |_i, _a| {
+                let i = pos.get();
+                if i >= s.len() {
+                    return Ok(vec![nil()]);
+                }
+                pos.set(i + 1);
+                Ok(vec![Value::Str(Rc::from(&s[i..i + 1]))])
+            }),
+        })))]);
+    }
     let t = match args.first() {
         Some(Value::Table(t)) => t.clone(),
         _ => {

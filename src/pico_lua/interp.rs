@@ -252,10 +252,28 @@ impl Interp {
         if self.instruction_budget.is_multiple_of(20_000_000) {
             static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
             if *TRACE.get_or_init(|| std::env::var_os("PICOR_TRACE").is_some()) {
+                let kind = match stat {
+                    Stat::Assign(l, r) => format!("Assign({} = {} exprs)", l.len(), r.len()),
+                    Stat::LocalAssign(n, _) => format!("Local({})", n.join(",")),
+                    Stat::Call(_) => "Call".into(),
+                    Stat::Do(_) => "Do".into(),
+                    Stat::While(..) => "While".into(),
+                    Stat::Repeat(..) => "Repeat".into(),
+                    Stat::If(..) => "If".into(),
+                    Stat::NumericFor(n, ..) => format!("NumFor({})", n),
+                    Stat::GenericFor(n, ..) => format!("GenFor({})", n.join(",")),
+                    Stat::LocalFunction(n, _) => format!("LocalFn({})", n),
+                    Stat::Return(_) => "Return".into(),
+                    Stat::Break => "Break".into(),
+                    Stat::Goto(n) => format!("Goto({})", n),
+                    Stat::Label(n) => format!("Label({})", n),
+                };
                 eprintln!(
-                    "[trace] ~{}M stmts, line {}",
+                    "[trace] ~{}M stmts, line {}, depth {}, {}",
                     self.instruction_budget / 1_000_000,
-                    self.current_line
+                    self.current_line,
+                    self.frames.len(),
+                    kind
                 );
             }
         }
