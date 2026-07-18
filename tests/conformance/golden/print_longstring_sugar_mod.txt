@@ -1,0 +1,3 @@
+RESULT multiline_print ok
+RESULT sugar_mod 2
+DONE

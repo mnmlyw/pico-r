@@ -311,3 +311,10 @@ Corpus re-sweep: **163/188 clean** (up from 160) — **zero regressions**. Three
 - **`stat(80..85)`/`stat(90..95)` (UTC/local date-time components) returned the generic 0 fallback... actually nil-adjacent behavior crashed date-display carts — now return a fixed, plausible timestamp** (2024-01-01 12:00:00; real wall-clock values can't be deterministic in tests). Confirmed on a real corpus cart (`kokoroko-3.p8.png`: prints a `stat(92)..sep..stat(91)` clock). | `src/pico_lua/api.rs` (`api_stat`)
 
 Corpus re-sweep: **165/188 clean** (up from 163) — **zero regressions**. Two full clean fixes (`kokoroko-3.p8.png`, `woodworm-0.p8.png`).
+
+### Follow-up: pushing toward 100% clean — multi-line `?[[...]]` and string-sugar `%` (round 22)
+
+- **A `?`-print whose argument is a multi-line `[[ ]]` long string closed its `print(` paren at the first physical line's end, corrupting the string — fixed.** The pending close is now carried across physical lines alongside the existing long-string state (`pending_print` flag threaded through `preprocess` → `process_line`), deferring the `)` until the string and any trailing args on the closing line finish. Confirmed on a real corpus cart (`homunculus-0.p8.png`: `?[[ ENTER ... ]],102,29,2`). | `src/preprocessor.rs`
+- **`%` right after a string literal's closing quote is modulo, not the peek2 shortcut — fixed.** In operator position (these scanners only run outside string literals) a quote means a string value just ended — e.g. string-call sugar `p"n4"%6`. Added closing quotes to `is_prev_value`'s value-like set. Confirmed on a real corpus cart (`picodex_dual-1.p8.png`: `T.S[p"n4"%6+1]`, which now clears all parse errors and fails only on a deeper runtime gap). | `src/preprocessor.rs` (`is_prev_value`)
+
+Corpus re-sweep: **166/188 clean** (up from 165) — **zero regressions**. One full clean fix (`homunculus-0.p8.png`).

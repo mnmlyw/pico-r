@@ -7,6 +7,7 @@ pub fn preprocess(source: &str) -> String {
     let mut long_comment_level: usize = 0;
     let mut in_long_string = false;
     let mut long_string_level: usize = 0;
+    let mut pending_print = false;
 
     let mut first_line = true;
     for raw_line in source.as_bytes().split(|&b| b == b'\n') {
@@ -26,6 +27,7 @@ pub fn preprocess(source: &str) -> String {
                         &mut long_comment_level,
                         &mut in_long_string,
                         &mut long_string_level,
+                        &mut pending_print,
                     );
                 }
             }
@@ -44,6 +46,7 @@ pub fn preprocess(source: &str) -> String {
                         &mut long_comment_level,
                         &mut in_long_string,
                         &mut long_string_level,
+                        &mut pending_print,
                     );
                 }
             } else {
@@ -59,6 +62,7 @@ pub fn preprocess(source: &str) -> String {
             &mut long_comment_level,
             &mut in_long_string,
             &mut long_string_level,
+            &mut pending_print,
         );
     }
 
@@ -73,6 +77,7 @@ fn preprocess_and_process_line(
     long_comment_level: &mut usize,
     in_long_string: &mut bool,
     long_string_level: &mut usize,
+    pending_print: &mut bool,
 ) {
     let spaced = insert_number_spaces(raw_line);
     let expanded = expand_short_ifs(&spaced);
@@ -84,6 +89,7 @@ fn preprocess_and_process_line(
         long_comment_level,
         in_long_string,
         long_string_level,
+        pending_print,
     );
 }
 
@@ -235,6 +241,7 @@ fn process_line(
     long_comment_level: &mut usize,
     in_long_string: &mut bool,
     long_string_level: &mut usize,
+    pending_print: &mut bool,
 ) {
     let mut i = 0;
     let mut in_string: u8 = 0;
@@ -247,7 +254,8 @@ fn process_line(
     // the same line — `end`, `;`, more statements — gets swallowed too and
     // fails to compile in official PICO-8 as well; carts relying on that
     // are simply broken there too, not a pico-r gap.
-    let mut print_shorthand_active = false;
+    let mut print_shorthand_active = *pending_print;
+    *pending_print = false;
 
     while i < line.len() {
         let ch = line[i];
@@ -541,7 +549,16 @@ fn process_line(
     }
 
     if print_shorthand_active {
-        out.push(b')');
+        if *in_long_string {
+            // A `?`-print whose argument is a multi-line `[[ ]]` long
+            // string (homunculus-0.p8.png: `?[[ ENTER ... ]],102,29,2`)
+            // must not close its paren until the string (and any trailing
+            // args on that later line) end -- carry the pending close
+            // across physical lines like the long-string state itself.
+            *pending_print = true;
+        } else {
+            out.push(b')');
+        }
     }
 }
 
@@ -602,7 +619,13 @@ fn is_prev_value(line: &[u8], pos: usize) -> bool {
     // byte isn't ASCII-alphanumeric, even though the identifier it expands
     // to clearly is a value). Confirmed against a real corpus cart
     // (batazubipe-0.p8.png: a glyph directly followed by `%40`).
-    prev == b')' || prev == b']' || prev >= 0x80
+    //
+    // A quote here (these callers only scan OUTSIDE string literals) is a
+    // closing quote -- a string value just ended, e.g. the string-call
+    // sugar `p"n4"%6` where `%` is modulo on the call's result, not the
+    // peek2 shortcut. Confirmed on a real corpus cart
+    // (picodex_dual-1.p8.png: `T.S[p"n4"%6+1]`).
+    prev == b')' || prev == b']' || prev == b'"' || prev == b'\'' || prev >= 0x80
 }
 
 fn parse_binary_literal(s: &[u8]) -> f64 {
