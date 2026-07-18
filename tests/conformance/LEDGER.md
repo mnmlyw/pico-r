@@ -377,3 +377,13 @@ Corpus re-sweep: **178/188 clean** (unchanged) — **zero regressions**.
 - **`stat(30)` (devkit key pending), `stat(31)` (pending key), `stat(28,code)` (raw scancode held), `stat(120)`/`stat(121)` (stdin/serial data pending) implemented with their oracle-confirmed types: booleans (false) and empty string.** The generic numeric-0 fallback was TRUTHY in Lua, so `while stat(30) do ... end` key-drain loops spun forever. `terra_1cart-42.p8.png` gets past those loops now but still hangs inside a map-generation `repeat ... until mget(...)` loop in `_init` — a deeper divergence not yet located. | `src/pico_lua/api.rs` (`api_stat`)
 
 Corpus re-sweep: **178/188 clean** (unchanged) — **zero regressions**.
+
+### Follow-up: pushing toward 100% clean — big-map registers done right (round 32)
+
+Located `terra_1cart-42.p8.png`'s `_init` hang with a new opt-in `PICOR_TRACE=1` statement-count/line tracer: an infinite crystal-placement loop sampling map cells at x∈0..255, y∈60..117 — coordinates that only exist in PICO-8's big-map mode (`poke(0x5f56,0x80,0)`: map base page 0x80 → 32KB of upper RAM as a 256-wide, 128-tall map).
+
+- **`mget`/`mset` with a custom map base now address the whole custom region row-major — including x<128 — with height = however many full rows fit between the base and end of RAM.** The old code kept x<128 on the classic 0x2000 accessors regardless of the base register and capped y at 64. All semantics oracle-confirmed with a dedicated probe (writes to the region land at base*256 + y*width + x; the classic map is untouched while a custom base is active and intact after restoring it; y=128 is OOB for the 0x80 base). | `src/gfx.rs` (`custom_map_region`, `map_get_wide`, `map_set_wide`)
+- **The map base register 0x5F56 was never initialized to its default 0x20** — with the new custom-region path, a fresh cart's mget/mset would have redirected into the sprite sheet. Now set alongside the width register's 128 default in both `Memory::new` and `init_draw_state`. | `src/memory.rs`
+- Also added the `PICOR_TRACE` hang locator itself (per-20M-statement line report, env-gated, zero cost when off). | `src/pico_lua/interp.rs`
+
+Corpus re-sweep: **179/188 clean** (up from 178) — **zero regressions**. One full clean fix (`terra_1cart-42.p8.png`).

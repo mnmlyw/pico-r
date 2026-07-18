@@ -507,10 +507,38 @@ pub fn map(
     }
 }
 
+/// Resolve the active map region: (base_addr, width, height). With the
+/// default base page 0x20 the classic accessors (0x2000 + shared 0x1000)
+/// apply and this returns None. A custom base (big maps: `poke(0x5f56,
+/// 0x80,0)` = 32KB of upper RAM as a 256-wide, 128-tall map) is row-major
+/// at base*256 for ALL columns -- including x<128 -- and its height is
+/// however many full rows fit between the base and the end of RAM; both
+/// confirmed via oracle (terra_1cart-42.p8.png generates its world there).
+fn custom_map_region(memory: &Memory) -> Option<(usize, i32, i32)> {
+    let base = memory.ram[0x5F56] as usize;
+    if base == 0x20 {
+        return None;
+    }
+    let map_w = if memory.ram[memory::ADDR_MAP_WIDTH as usize] == 0 {
+        256
+    } else {
+        memory.ram[memory::ADDR_MAP_WIDTH as usize] as i32
+    };
+    let start = base * 256;
+    let height = ((memory::RAM_SIZE - start) as i32) / map_w;
+    Some((start, map_w, height))
+}
+
 pub fn map_get_wide(memory: &Memory, x: i32, y: i32) -> u8 {
-    // Confirmed against official PICO-8: a raw 0 here means width 256, not
-    // 128 (Memory::new/init_draw_state set the default byte to 128 so a
-    // fresh cart still gets the normal 128-wide map).
+    if let Some((start, map_w, height)) = custom_map_region(memory) {
+        if x < 0 || x >= map_w || y < 0 || y >= height {
+            return 0;
+        }
+        return memory.ram[start + (y * map_w + x) as usize];
+    }
+    // Classic map. Confirmed against official PICO-8: a raw 0 width means
+    // 256, not 128 (Memory::new/init_draw_state set the default byte to
+    // 128 so a fresh cart still gets the normal 128-wide map).
     let map_w = if memory.ram[memory::ADDR_MAP_WIDTH as usize] == 0 {
         256
     } else {
@@ -529,9 +557,13 @@ pub fn map_get_wide(memory: &Memory, x: i32, y: i32) -> u8 {
 }
 
 pub fn map_set_wide(memory: &mut Memory, x: i32, y: i32, val: u8) {
-    // Confirmed against official PICO-8: a raw 0 here means width 256, not
-    // 128 (Memory::new/init_draw_state set the default byte to 128 so a
-    // fresh cart still gets the normal 128-wide map).
+    if let Some((start, map_w, height)) = custom_map_region(memory) {
+        if x < 0 || x >= map_w || y < 0 || y >= height {
+            return;
+        }
+        memory.ram[start + (y * map_w + x) as usize] = val;
+        return;
+    }
     let map_w = if memory.ram[memory::ADDR_MAP_WIDTH as usize] == 0 {
         256
     } else {

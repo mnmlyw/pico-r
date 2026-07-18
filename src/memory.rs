@@ -65,6 +65,10 @@ impl Memory {
         // width 256, not the standard map's 128 — so the default map width
         // needs an explicit nonzero byte here, not just "leave it zeroed".
         m.ram[ADDR_MAP_WIDTH as usize] = 128;
+        // Map base page register: default 0x20 (map at 0x2000). Without
+        // this, the custom-map-region path saw base 0 and redirected
+        // mget/mset into the sprite sheet on a fresh cart.
+        m.ram[0x5F56] = 0x20;
         m
     }
 
@@ -104,6 +108,7 @@ impl Memory {
         self.ram[ADDR_SPRITE_PAGE as usize] = 0x00;
         self.ram[ADDR_SCREEN_PAGE as usize] = 0x60;
         self.ram[ADDR_MAP_WIDTH as usize] = 128;
+        self.ram[0x5F56] = 0x20;
     }
 
     pub fn save_rom(&mut self) {

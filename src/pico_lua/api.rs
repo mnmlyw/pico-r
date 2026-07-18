@@ -1887,13 +1887,8 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         // be reproduced deterministically in tests, so return a fixed,
         // plausible timestamp rather than nil (which crashed carts that
         // concatenate the components).
-        // Devkit keyboard: stat(30) is the has-pending-key FLAG (false,
-        // a boolean -- the old generic 0 fallback was TRUTHY in Lua and
-        // made `while stat(30) do ... end` key-drain loops spin forever,
-        // terra_1cart-42.p8.png); stat(31) is the pending key ("").
-        // Both oracle-confirmed.
-        30 => boolv(false),
-        31 => str_v(b""),
+        // (Devkit stat(30)/stat(31) are handled above with the input
+        // state; both return their oracle-confirmed boolean/string types.)
         // stat(28,code): raw keyboard scancode held? stat(120)/stat(121):
         // stdin/serial data pending? All false headlessly, and all
         // BOOLEANS on official (oracle-confirmed) -- the generic numeric

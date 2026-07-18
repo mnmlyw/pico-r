@@ -245,6 +245,20 @@ impl Interp {
     }
 
     fn execute_statement(&mut self, stat: &Stat) -> Result<Flow, RtError> {
+        // Opt-in hang locator: with PICOR_TRACE=1, periodically report the
+        // most recently visited source line so an infinite loop can be
+        // found without a debugger.
+        self.instruction_budget = self.instruction_budget.wrapping_add(1);
+        if self.instruction_budget.is_multiple_of(20_000_000) {
+            static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            if *TRACE.get_or_init(|| std::env::var_os("PICOR_TRACE").is_some()) {
+                eprintln!(
+                    "[trace] ~{}M stmts, line {}",
+                    self.instruction_budget / 1_000_000,
+                    self.current_line
+                );
+            }
+        }
         match stat {
             Stat::Assign(lhs, rhs) => {
                 let values = self.eval_exp_list(rhs, lhs.len())?;
