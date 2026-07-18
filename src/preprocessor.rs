@@ -708,6 +708,28 @@ fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
                             result.extend_from_slice(separator);
                             result.push(b' ');
                             ends_needed += 1;
+                            if rest_after_body[0] == b'?' {
+                                // The short-if body is a `?` print-shorthand,
+                                // which consumes to the end of the physical
+                                // line. This pass runs BEFORE process_line's
+                                // own `?`-handling, so if we appended a
+                                // literal " end" after copying the body
+                                // verbatim (the normal path below), that
+                                // later pass would swallow it too --
+                                // producing `print(msg,0,0,8 end)` instead
+                                // of `print(msg,0,0,8) end`. Convert to
+                                // print(...) here instead, so nothing `?`
+                                // would consume is left after it. Confirmed
+                                // against real corpus carts
+                                // (pong_xmas-0.p8.png, lv-2.p8.png).
+                                result.extend_from_slice(b"print(");
+                                result.extend_from_slice(&rest_after_body[1..]);
+                                result.push(b')');
+                                for _ in 0..ends_needed {
+                                    result.extend_from_slice(b" end");
+                                }
+                                return Some(result);
+                            }
                             i = body_start;
                             continue;
                         }
@@ -757,6 +779,18 @@ fn is_continuation_body(rest: &[u8]) -> bool {
                 return true;
             }
         }
+    }
+    // A body that's nothing but a dangling binary operator (e.g.
+    // `if(a)==` continuing on the next line with `(b) then`) can never
+    // be a complete short-if statement by itself -- confirmed against a
+    // real corpus cart (balloon-1.p8.png) where this was misexpanded
+    // into `if a then == end`, swallowing the real condition/then that
+    // followed on the next line.
+    const DANGLING_OPS: &[&[u8]] = &[
+        b"==", b"~=", b"<=", b">=", b"..", b"<", b">", b"+", b"-", b"*", b"/", b"%", b"^",
+    ];
+    if DANGLING_OPS.contains(&trimmed) {
+        return true;
     }
     false
 }

@@ -1,0 +1,4 @@
+RESULT compound_and_or 5
+RESULT dangling_op_cond matched
+RESULT shortif_question_mark ok
+DONE
