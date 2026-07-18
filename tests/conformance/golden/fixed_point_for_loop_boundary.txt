@@ -1,0 +1,3 @@
+RESULT count_to_max 8
+RESULT count_past_max 0
+DONE

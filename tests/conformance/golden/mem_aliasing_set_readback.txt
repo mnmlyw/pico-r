@@ -1,0 +1,8 @@
+RESULT sget_after_sset 5
+RESULT peek_after_sset 5
+RESULT mget_after_sset 5
+RESULT peek_after_mset 42
+RESULT sget_after_mset_x2 10
+RESULT sget_after_mset_x3 2
+RESULT mget_after_mset 42
+DONE

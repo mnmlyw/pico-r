@@ -258,24 +258,15 @@ fn parse_p8_png(data: &[u8], memory: &mut Memory) -> Result<Cart, CartError> {
     let data_end = 0x4300usize;
     memory.ram[..data_end].copy_from_slice(&cart_data[..data_end]);
 
-    // Rearrange SFX header layout: native PNG format has notes first, header last.
-    for sfx_i in 0..64u16 {
-        let base = memory::ADDR_SFX as usize + (sfx_i as usize) * 68;
-        let hdr = [
-            memory.ram[base + 64],
-            memory.ram[base + 65],
-            memory.ram[base + 66],
-            memory.ram[base + 67],
-        ];
-        // Shift 64 bytes of note data forward by 4 (copy backwards to handle overlap)
-        for i in (0..64).rev() {
-            memory.ram[base + 4 + i] = memory.ram[base + i];
-        }
-        memory.ram[base] = hdr[0];
-        memory.ram[base + 1] = hdr[1];
-        memory.ram[base + 2] = hdr[2];
-        memory.ram[base + 3] = hdr[3];
-    }
+    // The PNG ROM image is the RAM layout VERBATIM -- including the sfx
+    // section. An earlier version of this loader "rearranged" each sfx
+    // entry here (moving a supposed trailing header to the front), which
+    // corrupted all of 0x3200..0x42ff: block-checksum comparison against
+    // official PICO-8's own reload() of the same .p8.png showed gfx, map,
+    // gff, and song regions byte-identical and every sfx block divergent
+    // until the shuffle was removed (probe: praxis_fighter_x-2 sfx region;
+    // its LZW payload spans into the sfx section, which is how the
+    // corruption became load-fatal rather than merely audible).
 
     let lua_region = &cart_data[0x4300..0x8000];
     let lua_code = decompress_lua(lua_region)?;

@@ -1,0 +1,25 @@
+pico-8 cartridge // http://www.pico-8.com
+version 42
+__lua__
+s="hello"
+printh("RESULT a:"..tostr(s[1]))
+printh("RESULT b:"..tostr(s[2]))
+printh("RESULT c:"..tostr(s[5]))
+printh("RESULT d:"..tostr(s[6]))
+printh("RESULT e:"..tostr(s[0]))
+printh("RESULT f:"..tostr(s[-1]))
+printh("RESULT g:"..tostr(s[-5]))
+printh("RESULT h:"..tostr(s[1.7]))
+printh("RESULT i:"..tostr(s["2"]))
+printh("RESULT j:"..tostr(s.x))
+printh("RESULT k:"..tostr(("ab")[2]))
+printh("RESULT l:"..tostr(s[9999]))
+printh("RESULT m:"..tostr(s[-1.5]))
+printh("RESULT n:"..tostr(s[-0.5]))
+printh("RESULT o:"..tostr(s["2.9"]))
+printh("RESULT p:"..tostr(s["-1"]))
+printh("RESULT q:"..tostr(s["0x3"]))
+printh("RESULT r:"..tostr(s[""]))
+-- assignment into a string errors on official (truncates output here)
+t="ab" t[1]="z" printh("RESULT m:"..tostr(t))
+printh("DONE")

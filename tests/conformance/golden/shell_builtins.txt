@@ -1,0 +1,17 @@
+RESULT help:function
+RESULT ls:function
+RESULT dir:function
+RESULT cd:function
+RESULT mkdir:function
+RESULT folder:function
+RESULT save:function
+RESULT info:function
+RESULT run:function
+RESULT reboot:function
+RESULT shutdown:function
+RESULT exit:function
+RESULT keyconfig:function
+RESULT splore:function
+RESULT install_demos:function
+RESULT install_games:function
+DONE

@@ -12,6 +12,7 @@ use super::value::*;
 use crate::gfx;
 use crate::memory as mem;
 use crate::state::PicoState;
+use crate::trigtables::{ATANTABLE, SINTABLE};
 
 // === Helpers ===
 
@@ -88,21 +89,6 @@ fn arg_addr(args: &[Value], i: usize) -> u16 {
         return 0;
     }
     safe_to_i32(f.floor()) as u16
-}
-
-fn to_fixed(v: f64) -> i32 {
-    let scaled = v * 65536.0;
-    if scaled.is_nan() {
-        return 0;
-    }
-    if scaled > i32::MAX as f64 || scaled < i32::MIN as f64 {
-        let wide = scaled as i64;
-        return wide as i32;
-    }
-    scaled as i32
-}
-fn from_fixed(v: i32) -> f64 {
-    v as f64 / 65536.0
 }
 
 // === Color helper for gfx ===
@@ -264,6 +250,34 @@ pub fn register_all(globals: &Rc<Table>) {
     set("readrom", api_readrom);
     set("reset", api_reset);
     set("stop", api_stop);
+
+    // === Shell commands ===
+    // Official PICO-8 exposes its terminal commands as callable Lua
+    // globals inside the cart environment (oracle-confirmed: type(help),
+    // type(ls), type(cd) etc. are all "function" under -x, and resume is a
+    // boolean). Carts exploit this -- redash-7 uses the builtin `help` as
+    // its no-op default callback for actor events. All inert here except
+    // `run`, which really does restart the cart.
+    set("run", api_run);
+    for name in [
+        "help",
+        "ls",
+        "dir",
+        "cd",
+        "mkdir",
+        "folder",
+        "save",
+        "info",
+        "reboot",
+        "shutdown",
+        "exit",
+        "keyconfig",
+        "splore",
+        "install_demos",
+        "install_games",
+    ] {
+        set(name, api_shell_noop);
+    }
 }
 
 // === stdlib bodies ===
@@ -352,9 +366,19 @@ fn lua_next(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
     };
     let prev_key = args.get(1).cloned().unwrap_or(Value::Nil);
     let table = t.borrow();
-    // Build a deterministic-ish ordering based on hashmap iteration. Lua doesn't
-    // guarantee ordering anyway.
-    let keys: Vec<Key> = table.map.keys().cloned().collect();
+    // Sequential positive-integer ("array part") keys are yielded first, in
+    // ascending order -- this matches real Lua/PICO-8 for the common
+    // list-like-table case and is unambiguous, unlike hash-part order (which
+    // depends on real Lua's bucket layout/rehash history and isn't worth
+    // replicating -- see tests/conformance/LEDGER.md). Remaining keys follow
+    // in whatever order the backing HashMap iterates them (non-deterministic
+    // across runs, but real Lua/PICO-8's own hash-part order isn't a fixed
+    // target either).
+    let mut keys: Vec<Key> = table.map.keys().cloned().collect();
+    keys.sort_by_key(|k| match k {
+        Key::Int(i) if *i >= 1 => (0, *i),
+        _ => (1, 0),
+    });
     let prev_keyed = Key::from_value(&prev_key);
     let mut found = matches!(prev_key, Value::Nil);
     for k in &keys {
@@ -514,29 +538,84 @@ fn api_ceil(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 fn api_sqrt(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
-    Ok(vec![num(if v >= 0.0 { v.sqrt() } else { 0.0 })])
+    Ok(vec![num(quantize(if v >= 0.0 { v.sqrt() } else { 0.0 }))])
+}
+// PICO-8's sin()/cos() are NOT continuous math -- they reduce the
+// argument to a single 1/4-turn octant and look up a 4096-entry
+// table (SINTABLE) that z8lua generated as `sin(x) - 4*x` over
+// x in [0, 0.25] turns, so that adding the linear term back
+// (`idx*16`) reconstructs `sin` while keeping the stored magnitudes
+// small enough to fit in a u16. This mirrors z8lua's `sin_helper`
+// bit-for-bit (see LEDGER.md for how this was reverse-engineered and
+// confirmed against the real PICO-8 binary).
+//
+// `x_bits` is the 16.16 fixed-point bit pattern of the argument, in
+// "turns" (same convention `to_fixed`/`from_fixed` use elsewhere).
+fn sin_helper(x_bits: i32) -> i32 {
+    // Fold to the first quarter-turn: PICO-8 uses `sin(x) == sin(~x)`
+    // (bitwise complement, not `-x`) rather than a mirror around 0.25.
+    let comp = if x_bits & 0x4000 != 0 {
+        !x_bits
+    } else {
+        x_bits
+    };
+    // Low 14 bits address a quarter turn at 1/16384 resolution; `+2`
+    // rounds the 2 bits about to be dropped by the `>>2` below.
+    let a = (comp & 0x3fff) + 2;
+    // `a>>2` can reach exactly `SINTABLE.len()` (4096) when the low 14
+    // bits are all set -- one past the last real entry. That case sits
+    // exactly on a table boundary where the reconstructed value would
+    // be `4096*16 + 0`; clamping to the last entry (`4095*16 + 16`)
+    // gives the identical result, so no out-of-bounds table is needed.
+    let idx = ((a >> 2) as usize).min(SINTABLE.len() - 1);
+    let ret_bits = (idx as i32) * 16 + SINTABLE[idx] as i32;
+    if x_bits & 0x8000 != 0 {
+        ret_bits
+    } else {
+        -ret_bits
+    }
 }
 fn api_sin(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
-    Ok(vec![num(-(v * std::f64::consts::TAU).sin())])
+    Ok(vec![num(from_fixed(sin_helper(to_fixed(v))))])
 }
 fn api_cos(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
-    Ok(vec![num((v * std::f64::consts::TAU).cos())])
+    // cos(x) == sin(x - 0.25 turns)
+    let shifted = to_fixed(v).wrapping_sub(0x4000);
+    Ok(vec![num(from_fixed(sin_helper(shifted)))])
 }
 fn api_atan2(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    // Mirrors z8lua's `pico8_atan2`: reduce |dy/dx| to octant 0..=1 via
+    // ATANTABLE (2049 entries, 1/2048-turn resolution, generated as
+    // `atan2(1, -i)` for i in [0,1]), then fold quadrants back in with
+    // sign/complement math rather than reflecting through -x.
     let dx = arg_num(&a, 0).unwrap_or(0.0);
     let dy = arg_num(&a, 1).unwrap_or(0.0);
-    if dx == 0.0 && dy == 0.0 {
-        return Ok(vec![num(0.25)]);
+    let x_bits = to_fixed(dx);
+    let y_bits = to_fixed(dy);
+    let mut bits: i32 = 0x4000;
+    if x_bits != 0 {
+        let q = ((y_bits as i64).abs() << 16) / (x_bits as i64).abs();
+        if q > 0x10000 {
+            // |dy/dx| > 1: look up the reciprocal instead (ATANTABLE
+            // only covers ratios in [0,1], i.e. angles up to 45deg) and
+            // use the complementary-angle identity.
+            let recip = (1i64 << 32) / q;
+            let idx = ((recip >> 5) as usize).min(ATANTABLE.len() - 1);
+            bits -= ATANTABLE[idx] as i32;
+        } else {
+            let idx = ((q >> 5) as usize).min(ATANTABLE.len() - 1);
+            bits = ATANTABLE[idx] as i32;
+        }
     }
-    // PICO-8 atan2 returns turns in [0,1) with y inverted
-    let r = (-dy).atan2(dx);
-    let mut t = r / std::f64::consts::TAU;
-    if t < 0.0 {
-        t += 1.0;
+    if x_bits < 0 {
+        bits = 0x8000 - bits;
     }
-    Ok(vec![num(t)])
+    if y_bits > 0 {
+        bits = (-bits) & 0xffff;
+    }
+    Ok(vec![num(from_fixed(bits))])
 }
 fn api_max(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let mut r = arg_num(&a, 0).unwrap_or(0.0);
@@ -558,37 +637,72 @@ fn api_mid(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let z = arg_num(&a, 2).unwrap_or(0.0);
     Ok(vec![num(x.min(y).max(x.max(y).min(z)))])
 }
+// Oracle-confirmed against official PICO-8 (tests/conformance/probes/
+// rng_algorithm.p8, fixed_point_api_granularity.p8): two interleaved 32-bit
+// words (hi/lo), advanced each draw by rotating hi left 16 bits then adding
+// lo (wrapping), with lo then advancing by the *new* hi (also wrapping).
+// srand() reseeds via lo=seed (or 0xdeadbeef if seed==0) with its sign bit
+// cleared, hi=lo^0xbead29ba, then runs the same step 32 times as a warmup.
+fn rng_step(host: &mut PicoState) -> u32 {
+    let old_lo = host.rng_lo;
+    let f = host.rng_hi.rotate_left(16).wrapping_add(old_lo);
+    host.rng_hi = f;
+    host.rng_lo = f.wrapping_add(old_lo);
+    f
+}
 fn api_rnd(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     if let Some(Value::Table(t)) = a.first() {
         let len = t.borrow().raw_len();
         if len == 0 {
             return Ok(vec![nil()]);
         }
-        let r = xorshift(i) % len as u32;
-        let v = t.borrow().get(&num((r + 1) as f64));
+        // Same draw-and-extract as the scalar branch below (n_raw = len),
+        // then floor to an index. NOT oracle-confirmed for the exact
+        // index-selection order -- the scalar rnd(n)/srand(n) algorithm
+        // itself is bit-exact verified, but repeated attempts to pin down
+        // rnd(table)'s precise draw-to-index mapping against official
+        // PICO-8 didn't converge (see LEDGER.md). This stays internally
+        // consistent with the verified generator rather than guessing
+        // further at the mapping.
+        let n_raw = to_fixed(len as f64);
+        let f = rng_step(i.host()) as i32;
+        let result_raw = ((f as u32) % (n_raw as u32)) as i32;
+        let idx = from_fixed(result_raw).floor() as i64 + 1;
+        let v = t.borrow().get(&num(idx as f64));
         return Ok(vec![v]);
     }
     let max = arg_num(&a, 0).unwrap_or(1.0);
-    let r = xorshift(i) as f64 / 4294967296.0;
-    Ok(vec![num(r * max)])
+    let n_raw = to_fixed(max);
+    if n_raw == 0 {
+        // Confirmed: rnd(0) returns 0 without advancing the RNG state.
+        return Ok(vec![num(0.0)]);
+    }
+    let f = rng_step(i.host()) as i32;
+    let result_raw = if n_raw < 0 {
+        if n_raw <= f && f < 0 {
+            f.wrapping_sub(n_raw)
+        } else {
+            f
+        }
+    } else {
+        ((f as u32) % (n_raw as u32)) as i32
+    };
+    Ok(vec![num(from_fixed(result_raw))])
 }
 fn api_srand(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
-    let s = to_fixed(v) as u32;
-    i.host().rng_state = if s == 0 { 1 } else { s };
-    Ok(vec![])
-}
-fn xorshift(i: &mut Interp) -> u32 {
+    let seed_raw = to_fixed(v) as u32;
     let host = i.host();
-    if host.rng_state == 0 {
-        host.rng_state = 0x12345678;
+    host.rng_lo = if seed_raw == 0 {
+        0xDEADBEEF
+    } else {
+        seed_raw & 0x7FFFFFFF
+    };
+    host.rng_hi = host.rng_lo ^ 0xBEAD29BA;
+    for _ in 0..32 {
+        rng_step(host);
     }
-    let mut s = host.rng_state;
-    s ^= s << 13;
-    s ^= s >> 17;
-    s ^= s << 5;
-    host.rng_state = s;
-    s
+    Ok(vec![])
 }
 fn api_sgn(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = arg_num(&a, 0).unwrap_or(0.0);
@@ -737,7 +851,7 @@ fn api_tonum(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
                 .unwrap_or(0.0),
             _ => 0.0,
         };
-        return Ok(vec![num(hi as f64 + lo)]);
+        return Ok(vec![num(quantize(hi as f64 + lo))]);
     }
 
     if flags & 0x2 != 0 {
@@ -824,7 +938,7 @@ fn api_ord(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 // binary (`0b11`) literals -- confirmed via oracle (split"0x10" yields the
 // NUMBER 16, and split"0b11" yields 3; real corpus cart mer_ork-0.p8.png
 // passes memory addresses around as split"0x6000,0xe000,0x1fff").
-fn split_token_to_number(part: &[u8]) -> Option<f64> {
+pub(crate) fn split_token_to_number(part: &[u8]) -> Option<f64> {
     // Tokens numberize with surrounding whitespace ignored (" 6" -> 6,
     // " 0x10" -> 16, oracle-confirmed) -- but a token that FAILS to
     // convert keeps its original spacing as a string, so only this
@@ -1726,21 +1840,14 @@ fn api_poke2(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_peek4(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let addr = arg_addr(&a, 0);
     let raw = i.host().memory.peek32(addr);
-    let fixed = raw as i32;
-    Ok(vec![num(fixed as f64 / 65536.0)])
+    Ok(vec![num(from_fixed(raw as i32))])
 }
 fn api_poke4(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let addr = arg_addr(&a, 0);
     let v = arg_num(&a, 1).unwrap_or(0.0);
-    let scaled = v * 65536.0;
-    let fixed = if scaled >= i32::MAX as f64 {
-        i32::MAX
-    } else if scaled <= i32::MIN as f64 {
-        i32::MIN
-    } else {
-        scaled as i32
-    };
-    i.host().memory.poke32(addr, fixed as u32);
+    // Wraps (not clamps) on overflow, confirmed against official PICO-8:
+    // poke4(0,100000) round-trips through peek4 as -31072, not i32::MAX.
+    i.host().memory.poke32(addr, to_fixed(v) as u32);
     Ok(vec![])
 }
 fn api_memcpy(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -1775,6 +1882,29 @@ fn api_reload(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     } else {
         arg_int(&a, 2).unwrap_or(0) as u16
     };
+    // 4-arg form reads from ANOTHER cart file's ROM (resolved next to the
+    // current cart, like load()). Silently a same-cart reload if the file
+    // doesn't resolve, matching the no-op leniency of load().
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(Value::Str(name)) = a.get(3) {
+        let st = i.host();
+        if let Some(dir) = st.cart_dir.clone() {
+            let name = String::from_utf8_lossy(name).into_owned();
+            if let Some(path) = resolve_cart_file(&dir, &name) {
+                if let Ok(data) = std::fs::read(&path) {
+                    let mut scratch = crate::memory::Memory::new();
+                    if crate::cart::load_bytes(&data, &mut scratch).is_ok() {
+                        let (dst, src, len) = (dst as usize, src as usize, len as usize);
+                        let n = len
+                            .min(crate::memory::RAM_SIZE.saturating_sub(dst))
+                            .min(0x4300usize.saturating_sub(src));
+                        st.memory.ram[dst..dst + n].copy_from_slice(&scratch.ram[src..src + n]);
+                        return Ok(vec![]);
+                    }
+                }
+            }
+        }
+    }
     i.host().memory.reload(dst, src, len);
     Ok(vec![])
 }
@@ -1958,8 +2088,7 @@ fn api_dget(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     }
     let addr = mem::ADDR_CART_DATA + (idx as u16) * 4;
     let raw = i.host().memory.peek32(addr);
-    let fixed = raw as i32;
-    Ok(vec![num(fixed as f64 / 65536.0)])
+    Ok(vec![num(from_fixed(raw as i32))])
 }
 fn api_dset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let idx = arg_int(&a, 0).unwrap_or(0);
@@ -1968,15 +2097,8 @@ fn api_dset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         return Ok(vec![]);
     }
     let addr = mem::ADDR_CART_DATA + (idx as u16) * 4;
-    let scaled = v * 65536.0;
-    let fixed = if scaled >= i32::MAX as f64 {
-        i32::MAX
-    } else if scaled <= i32::MIN as f64 {
-        i32::MIN
-    } else {
-        scaled as i32
-    };
-    i.host().memory.poke32(addr, fixed as u32);
+    // Wraps (not clamps) on overflow, same as poke4 -- confirmed via oracle.
+    i.host().memory.poke32(addr, to_fixed(v) as u32);
     Ok(vec![])
 }
 // === Coroutines (see coroutine.rs for the threading model) ===
@@ -2042,17 +2164,79 @@ fn api_yield(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_menuitem(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![])
 }
-fn api_extcmd(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+fn api_shell_noop(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    Ok(vec![])
+}
+// `run([param_str])` restarts the current cart. Reuses the load-switch
+// machinery with the current cart as target (high RAM preserved, same as a
+// load() round trip). Without a host (wasm/interactive), a no-op.
+fn api_run(i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if !i.host.is_null() {
+        let st = i.host();
+        if let Some(path) = st.cart_path.clone() {
+            st.pending_load = Some(path);
+            return Err(RtError::msg(LOAD_SWITCH_MARKER));
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = i;
+    Ok(vec![])
+}
+// extcmd("breadcrumb") returns to the cart that load()ed this one (the
+// breadcrumb arg of that load call) -- the return leg of the multi-cart
+// warp below (redash-7's data cart loadash uses exactly this to hand
+// control back after staging its payload in high RAM). Everything else
+// extcmd does (screenshots, video, pause) is host-UI and stays a no-op.
+fn api_extcmd(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if !i.host.is_null() {
+        if let Some(Value::Str(cmd)) = a.first() {
+            if &**cmd == b"breadcrumb" {
+                let st = i.host();
+                if let (Some(bc), Some(dir)) = (st.breadcrumb.clone(), st.cart_dir.clone()) {
+                    if let Some(path) = resolve_cart_file(&dir, &bc) {
+                        st.breadcrumb = None;
+                        st.pending_load = Some(path);
+                        return Err(RtError::msg(LOAD_SWITCH_MARKER));
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = (i, a);
     Ok(vec![])
 }
 // `load(filename,[breadcrumb],[param_str])` loads and starts running a
 // *different* cart -- a multi-cart "warp" mechanism. Confirmed real via
 // oracle (calling it with a nonexistent cart name doesn't error; execution
-// just continues past it). This engine only ever loads one cart per
-// invocation and has no concept of switching carts at runtime, so this is
-// stubbed as a no-op -- confirmed real-world impact unblocking a crash on
-// a real corpus cart (solitomb-2.p8.png: `load'solitomb_title'` in _init).
-fn api_load(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+// just continues past it).
+fn api_load(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    // Real multi-cart switching on native hosts: resolve the target next
+    // to the current cart; on a hit, record it and unwind with the switch
+    // marker for the host to catch (RAM 0x8000+ survives the switch, which
+    // is the official data channel between carts). A target that does NOT
+    // resolve keeps the oracle-confirmed no-op behavior: execution just
+    // continues past the call (solitomb-2's `load'solitomb_title'` names a
+    // cart that was never published alongside it).
+    #[cfg(not(target_arch = "wasm32"))]
+    if !i.host.is_null() {
+        let st = i.host();
+        if let (Some(Value::Str(name)), Some(dir)) = (a.first(), st.cart_dir.clone()) {
+            let name = String::from_utf8_lossy(name).into_owned();
+            if let Some(path) = resolve_cart_file(&dir, &name) {
+                st.breadcrumb = match a.get(1) {
+                    Some(Value::Str(b)) => Some(String::from_utf8_lossy(b).into_owned()),
+                    _ => None,
+                };
+                st.pending_load = Some(path);
+                return Err(RtError::msg(LOAD_SWITCH_MARKER));
+            }
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = (i, a);
     Ok(vec![])
 }
 // `tline(x0,y0,x1,y1,mx,my,[mdx,mdy],[layers])` draws a textured line,
@@ -2112,6 +2296,54 @@ fn api_serial(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 /// Old-style carts run their entire game as `::_:: ... flip() goto _`
 /// at top level and would otherwise hang a headless run forever.
 pub const FLIP_LIMIT_MARKER: &str = "__picor_flip_limit__";
+
+/// Raised by `load()`/`extcmd("breadcrumb")` when a target cart file was
+/// resolved (recorded in state.pending_load): the host should preserve RAM
+/// 0x8000+ and boot the target cart. See tools/run_cart.rs.
+pub const LOAD_SWITCH_MARKER: &str = "__picor_load_switch__";
+
+/// Resolve a `load()` target the way official PICO-8 does for local files:
+/// exact filename, then with .p8/.p8.png appended; for BBS ids ("#name"),
+/// also `name-<version>.p8.png` next to the current cart, highest version
+/// winning (that's the filename shape of a local BBS download).
+#[cfg(not(target_arch = "wasm32"))]
+fn resolve_cart_file(dir: &str, name: &str) -> Option<String> {
+    let base = name.strip_prefix('#').unwrap_or(name);
+    if base.is_empty() {
+        return None;
+    }
+    let dirp = std::path::Path::new(dir);
+    let mut cands = vec![base.to_string()];
+    if !base.ends_with(".p8") && !base.ends_with(".p8.png") {
+        cands = vec![format!("{base}.p8"), format!("{base}.p8.png")];
+    }
+    for c in &cands {
+        let p = dirp.join(c);
+        if p.is_file() {
+            return Some(p.to_string_lossy().into_owned());
+        }
+    }
+    if name.starts_with('#') {
+        let mut best: Option<(i64, String)> = None;
+        let prefix = format!("{base}-");
+        if let Ok(rd) = std::fs::read_dir(dirp) {
+            for ent in rd.flatten() {
+                let f = ent.file_name().to_string_lossy().into_owned();
+                if let Some(ver) = f
+                    .strip_prefix(&prefix)
+                    .and_then(|r| r.strip_suffix(".p8.png"))
+                    .and_then(|v| v.parse::<i64>().ok())
+                {
+                    if best.as_ref().is_none_or(|(bv, _)| ver > *bv) {
+                        best = Some((ver, ent.path().to_string_lossy().into_owned()));
+                    }
+                }
+            }
+        }
+        return best.map(|(_, p)| p);
+    }
+    None
+}
 
 fn api_flip(i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let st = i.host();

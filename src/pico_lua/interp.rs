@@ -411,6 +411,15 @@ impl Interp {
                         Flow::Break => break,
                         other => return Ok(other),
                     }
+                    // Deliberately NOT quantized/wrapped, unlike a regular
+                    // `+`. Oracle-confirmed (fixed_point_for_loop_boundary.p8):
+                    // a loop counter that overflows past the fixed-point
+                    // range (e.g. 32767+1) must terminate via the plain,
+                    // unwrapped comparison below -- wrapping it here would
+                    // send i to -32768, which is not > stop, and the loop
+                    // would run forever instead of ending. start/stop/step
+                    // are already on-grid (from eval_expr_single), so this
+                    // stays exact for any in-range accumulation regardless.
                     i += step;
                 }
                 Ok(Flow::Normal)
@@ -538,15 +547,25 @@ impl Interp {
                 Ok(Value::Nil)
             }
             Value::Str(s) => {
-                // Support s[i] character indexing via PICO-8 convention --
-                // confirmed against official PICO-8 that this is real
-                // behavior, unlike string methods/library (see below).
-                if let Value::Number(n) = k {
-                    let idx = *n as i64;
+                // s[i] character indexing -- oracle-confirmed semantics
+                // (probe string_indexing): the key numberizes like tonum
+                // (string keys convert, hex/binary included: s["0x3"] ==
+                // s[3]), the index floors (s[-1.5] == s[-2]), and negative
+                // indexes count from the end (s[-1] is the last char).
+                // Out-of-range gives nil, NOT "" -- this is not sub().
+                let n = match k {
+                    Value::Number(n) => Some(*n),
+                    Value::Str(ks) => super::api::split_token_to_number(ks),
+                    _ => None,
+                };
+                if let Some(n) = n {
+                    let mut idx = n.floor() as i64;
+                    if idx < 0 {
+                        idx += s.len() as i64 + 1;
+                    }
                     if idx >= 1 && idx <= s.len() as i64 {
                         return Ok(Value::Str(Rc::from(&s[(idx - 1) as usize..idx as usize])));
                     }
-                    return Ok(Value::Nil);
                 }
                 // No string library/methods in official PICO-8 at all --
                 // confirmed via oracle (`("hi"):upper()` crashes on real
@@ -750,7 +769,11 @@ impl Interp {
                 let y = b
                     .as_number()
                     .ok_or_else(|| RtError::msg(format!("arith on {}", b.type_name())))?;
-                Ok(Value::Number(match op {
+                // Every result is re-quantized to the 16.16 fixed-point grid
+                // (confirmed via oracle, tests/conformance/probes/fixed_point_*.p8):
+                // this is where overflow wraparound comes from (e.g.
+                // 32767.5+1 -> -32767.5, 20000*2 -> -25536).
+                Ok(Value::Number(quantize(match op {
                     Add => x + y,
                     Sub => x - y,
                     Mul => x * y,
@@ -781,7 +804,7 @@ impl Interp {
                     }
                     Pow => x.powf(y),
                     _ => unreachable!(),
-                }))
+                })))
             }
             Concat => {
                 let sa = a.as_str().ok_or_else(|| {
@@ -833,7 +856,9 @@ impl Interp {
         match op {
             UnOp::Neg => {
                 if let Some(n) = v.as_number() {
-                    return Ok(Value::Number(-n));
+                    // Quantized so that negating the minimum representable value
+                    // wraps to itself, matching official PICO-8: -(-32768) == -32768.
+                    return Ok(Value::Number(quantize(-n)));
                 }
                 // `__unm` metamethod -- vector/matrix carts overload unary
                 // minus alongside the arithmetic metamethods

@@ -15,6 +15,31 @@ use super::interp::Interp;
 
 pub type Table = RefCell<TableInner>;
 
+// PICO-8 numbers are 16.16 fixed-point (16 integer bits, 16 fractional
+// bits, range -32768..32767.99998, increment 1/65536). Confirmed against
+// official PICO-8 (tests/conformance/probes/fixed_point_*.p8): scaling by
+// 65536 and truncating toward zero (not rounding to nearest) matches the
+// real hardware's quantization, and out-of-i32-range results wrap via a
+// 32-bit truncation of the wider intermediate rather than saturating.
+pub fn to_fixed(v: f64) -> i32 {
+    let scaled = v * 65536.0;
+    if scaled.is_nan() {
+        return 0;
+    }
+    if scaled > i32::MAX as f64 || scaled < i32::MIN as f64 {
+        let wide = scaled as i64;
+        return wide as i32;
+    }
+    scaled as i32
+}
+pub fn from_fixed(v: i32) -> f64 {
+    v as f64 / 65536.0
+}
+/// Round-trip a value through the 16.16 fixed-point grid.
+pub fn quantize(v: f64) -> f64 {
+    from_fixed(to_fixed(v))
+}
+
 impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -269,14 +294,19 @@ impl Value {
             Value::Number(n) => Some(*n),
             Value::Str(s) => {
                 let s = std::str::from_utf8(s).ok()?.trim();
-                if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+                let n = if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
                     i64::from_str_radix(rest, 16)
                         .ok()
                         .map(|n| n as f64)
                         .or_else(|| u64::from_str_radix(rest, 16).ok().map(|n| n as f64))
                 } else {
                     s.parse::<f64>().ok()
-                }
+                };
+                // String-to-number coercion is a literal-parse equivalent
+                // (arithmetic on coerced strings, tonum(), arg coercion all
+                // flow through here), so it's quantized the same way a
+                // source literal is.
+                n.map(quantize)
             }
             _ => None,
         }
@@ -316,27 +346,19 @@ pub fn number_to_str(n: f64) -> String {
     }
     // PICO-8 numbers are 16.16 fixed point, displayed rounded to 4 decimal
     // digits with trailing zeros stripped (confirmed against official
-    // PICO-8: e.g. 1/3 -> "0.3333", 2.99998 -> "3"). A small-magnitude
-    // float that rounds to "0.0000" at this display precision shows "0",
-    // not "-0" -- confirmed against official PICO-8 (`-0.00001` -> "0").
-    // Note this collapse is technically over-broad: official PICO-8
-    // genuinely prints "-0" for a handful of values that reach exactly the
-    // smallest representable negative fixed-point increment via bit
-    // manipulation (e.g. `bnot(0)`), which would need real 16.16
-    // quantization of every literal/arithmetic result (a known, deferred
-    // architectural gap -- see LEDGER.md) to distinguish correctly from an
-    // ordinary tiny float like `-0.00001` that real hardware collapses to
-    // exact zero at parse time. Until then this collapses both alike,
-    // matching the far more common ordinary-tiny-float case.
+    // PICO-8: e.g. 1/3 -> "0.3333", 2.99998 -> "3"). Every `Value::Number`
+    // is already quantized to the fixed-point grid at construction time
+    // (see `quantize`), so a literal like `-0.00001` (below the smallest
+    // representable increment) is exact zero by the time it reaches here,
+    // while a genuinely nonzero tiny negative value reached via bit
+    // manipulation (e.g. `bnot(0)` == -1/65536) prints "-0", matching
+    // official PICO-8 for both cases without needing a special-case collapse.
     let mut s = format!("{:.4}", n);
     while s.ends_with('0') {
         s.pop();
     }
     if s.ends_with('.') {
         s.pop();
-    }
-    if s == "-0" {
-        s = "0".to_string();
     }
     s
 }
