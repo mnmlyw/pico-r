@@ -387,3 +387,12 @@ Located `terra_1cart-42.p8.png`'s `_init` hang with a new opt-in `PICOR_TRACE=1`
 - Also added the `PICOR_TRACE` hang locator itself (per-20M-statement line report, env-gated, zero cost when off). | `src/pico_lua/interp.rs`
 
 Corpus re-sweep: **179/188 clean** (up from 178) — **zero regressions**. One full clean fix (`terra_1cart-42.p8.png`).
+
+### Follow-up: pushing toward 100% clean — closures captured stale shadowed bindings (round 33, foundational)
+
+Located via the new key-carrying index-error message (`attempt to index a number value (key "h")` pointed straight at an object whose constructor-captured closure held a number).
+
+- **A closure now captures the NEWEST binding of a shadowed local name — the old capture pushed duplicate names in declaration order and the upvalue lookup took the FIRST match, binding the stale outer local.** The golfed OOP idiom `function f(n) local n={...} n.B=function() return nB(n) end return n end` — a constructor whose object shadows its own parameter — captured the parameter (a number) instead of the object table. Fixed by scanning locals innermost-first with dedup at capture time. Oracle-verified (`probes/closure_shadowed_capture.p8`). | `src/pico_lua/interp.rs` (`make_closure`)
+- Also: index errors now name the key (`(key "h")`), matching the diagnostic spirit of official's "attempt to index field 'h'" and making this class of bug findable in seconds. | `src/pico_lua/interp.rs` (`table_get`)
+
+Corpus re-sweep: **182/188 clean** (up from 179) — **zero regressions**. Three full clean fixes: `driftmania-5.p8.png`, and — previously misattributed to the deferred fixed-point epic — `picodex_dual-1.p8.png` and `super_world_of_goo-6.p8.png`, whose decompressor failures were this same stale-capture bug all along.

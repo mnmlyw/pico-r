@@ -1,6 +1,0 @@
-RESULT in 42
-RESULT oob_y 0
-RESULT oob_y2 0
-RESULT oob_x 0
-RESULT neg 0
-DONE

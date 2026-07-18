@@ -511,8 +511,9 @@ impl Interp {
                 Ok(Value::Nil)
             }
             _ => Err(RtError::msg(format!(
-                "attempt to index a {} value",
-                t.type_name()
+                "attempt to index a {} value (key {:?})",
+                t.type_name(),
+                k
             ))),
         }
     }
@@ -822,8 +823,17 @@ impl Interp {
             }
         };
         // Capture a snapshot of all current locals + outer upvalues.
-        for (n, slot) in &frame.locals {
-            upvalues.push((Rc::clone(n), Rc::clone(slot)));
+        // Scan locals INNERMOST-FIRST and dedup: a shadowed name must
+        // capture its newest binding. (Previously duplicates were pushed
+        // in declaration order and the lookup took the first match, so a
+        // closure over `local n = {...}` declared after a param `n` bound
+        // the stale param -- driftmania-5.p8.png's `n.B=function()return
+        // nB(n)end` captured the constructor argument number instead of
+        // the object table.)
+        for (n, slot) in frame.locals.iter().rev() {
+            if !upvalues.iter().any(|(x, _)| x == n) {
+                upvalues.push((Rc::clone(n), Rc::clone(slot)));
+            }
         }
         for (n, slot) in &frame.upvalues {
             // Avoid shadowing same name — keep innermost if duplicates
