@@ -1,0 +1,4 @@
+RESULT stat16 3
+RESULT stat20 0
+RESULT stat100_type nil
+DONE

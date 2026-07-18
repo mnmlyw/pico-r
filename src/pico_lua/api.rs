@@ -1679,20 +1679,23 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         5 => str_v(b"0.2.3"),
         6 => str_v(b""),
         7 => num(st.target_fps as f64),
+        // Confirmed against official PICO-8 (sfx(3,0); stat(16)==3): stat
+        // 16-19 is the per-channel sfx index, 20-23 is the note index --
+        // the reverse of what these two branches previously returned.
         16..=19 => {
             let c = &st.audio.channels[(n - 16) as usize];
             if !c.finished && c.sfx_id >= 0 {
-                num(c.note_index as f64)
+                num(c.sfx_id as f64)
             } else {
-                num(0.0)
+                num(-1.0)
             }
         }
         20..=23 => {
             let c = &st.audio.channels[(n - 20) as usize];
             if !c.finished && c.sfx_id >= 0 {
-                num(c.sfx_id as f64)
+                num(c.note_index as f64)
             } else {
-                num(-1.0)
+                num(0.0)
             }
         }
         24 => num(st.audio.music_state.pattern as f64),
@@ -1739,6 +1742,10 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         55 => num(st.audio.music_state.total_patterns as f64),
         56 => num(st.audio.music_state.tick as f64),
         57 => boolv(st.audio.music_state.playing),
+        // Confirmed against official PICO-8: stat(100) (breadcrumb label)
+        // is nil when unset, not the generic 0 fallback other unhandled
+        // codes use.
+        100 => nil(),
         _ => num(0.0),
     };
     Ok(vec![v])
