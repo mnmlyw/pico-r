@@ -1,0 +1,4 @@
+RESULT full_text_hash 15936
+RESULT lowercase_hash 13198
+RESULT uppercase_hash 29682
+DONE

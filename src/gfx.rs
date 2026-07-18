@@ -565,6 +565,7 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
     let mut home_x = x;
     let mut home_y = y;
     let mut tab_w: i32 = 16;
+    let mut max_x = x;
     let mut i = 0usize;
     while i < text.len() {
         let ch = text[i];
@@ -688,8 +689,13 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
                 x += char_w;
             }
         }
+        // print()'s return value is the right-most x reached at any point
+        // while printing, not wherever a trailing newline left the cursor
+        // -- confirmed against official PICO-8 ("hello\nb" returns the x
+        // after "hello", not after "b").
+        max_x = max_x.max(x);
     }
-    x + cam_x
+    max_x + cam_x
 }
 
 fn draw_char(memory: &mut Memory, code: u8, x: i32, y: i32, col: u8) {

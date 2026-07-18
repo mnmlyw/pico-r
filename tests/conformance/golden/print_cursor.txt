@@ -1,0 +1,6 @@
+RESULT print_retval 20
+RESULT cx_after_explicit 5
+RESULT cy_after_explicit 11
+RESULT cx_multiline 20
+RESULT cy_multiline 32
+DONE

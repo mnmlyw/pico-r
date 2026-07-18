@@ -1284,26 +1284,32 @@ fn api_print(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         .and_then(|v| v.as_str())
         .unwrap_or_else(|| Rc::from(b"".as_slice()));
     let st = i.host();
-    let r = if a.len() <= 1 || matches!(a.get(1), Some(Value::Nil)) {
+    let (x, y, col) = if a.len() <= 1 || matches!(a.get(1), Some(Value::Nil)) {
         let cx = st.memory.ram[mem::ADDR_CURSOR_X as usize] as i32;
         let cy = st.memory.ram[mem::ADDR_CURSOR_Y as usize] as i32;
         let col = st.memory.ram[mem::ADDR_COLOR as usize] & 0x0F;
-        let r = gfx::draw_text(&mut st.memory, &txt, cx, cy, col);
-        st.memory.ram[mem::ADDR_CURSOR_Y as usize] = ((cy + 6) & 0xFF) as u8;
-        r
+        (cx, cy, col)
     } else if a.len() <= 2 || matches!(a.get(2), Some(Value::Nil)) {
         let cx = st.memory.ram[mem::ADDR_CURSOR_X as usize] as i32;
         let cy = st.memory.ram[mem::ADDR_CURSOR_Y as usize] as i32;
         let col = get_color(st, &a, 1);
-        let r = gfx::draw_text(&mut st.memory, &txt, cx, cy, col);
-        st.memory.ram[mem::ADDR_CURSOR_Y as usize] = ((cy + 6) & 0xFF) as u8;
-        r
+        (cx, cy, col)
     } else {
         let x = arg_int(&a, 1).unwrap_or(0);
         let y = arg_int(&a, 2).unwrap_or(0);
         let col = get_color(st, &a, 3);
-        gfx::draw_text(&mut st.memory, &txt, x, y, col)
+        (x, y, col)
     };
+    let r = gfx::draw_text(&mut st.memory, &txt, x, y, col);
+    // Confirmed against official PICO-8: print() always persists the
+    // cursor registers afterward, regardless of which argument form was
+    // used -- cursor_x resets to this call's starting x (not wherever the
+    // text ended up), and cursor_y advances by 6 PER LINE printed (not a
+    // flat +6), both confirmed via a "hello\nb" probe (cx stayed at
+    // start_x=20, cy became start_y+12 for its 2 lines, not +6).
+    let num_lines = 1 + txt.iter().filter(|&&b| b == b'\n').count() as i32;
+    st.memory.ram[mem::ADDR_CURSOR_X as usize] = (x & 0xFF) as u8;
+    st.memory.ram[mem::ADDR_CURSOR_Y as usize] = ((y + 6 * num_lines) & 0xFF) as u8;
     Ok(vec![num(r as f64)])
 }
 fn api_cursor(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
