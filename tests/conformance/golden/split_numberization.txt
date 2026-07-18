@@ -1,0 +1,12 @@
+RESULT a1 16 number
+RESULT a2 2 number
+RESULT a3 -3 number
+RESULT a4 3 number
+RESULT a5 0.5 number
+RESULT a6 400 number
+RESULT b1 [5] number
+RESULT b2 [6] number
+RESULT b3 [16] number
+RESULT b4 [x ] string
+RESULT b5 [16] number
+DONE

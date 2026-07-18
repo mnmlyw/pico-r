@@ -817,6 +817,58 @@ fn api_ord(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(out)
 }
 
+// split()'s token->number conversion matches official PICO-8's tonum-like
+// behavior, which also accepts hex (`0x6000`, with optional fraction) and
+// binary (`0b11`) literals -- confirmed via oracle (split"0x10" yields the
+// NUMBER 16, and split"0b11" yields 3; real corpus cart mer_ork-0.p8.png
+// passes memory addresses around as split"0x6000,0xe000,0x1fff").
+fn split_token_to_number(part: &[u8]) -> Option<f64> {
+    // Tokens numberize with surrounding whitespace ignored (" 6" -> 6,
+    // " 0x10" -> 16, oracle-confirmed) -- but a token that FAILS to
+    // convert keeps its original spacing as a string, so only this
+    // parsing path trims.
+    let txt = std::str::from_utf8(part).ok()?.trim();
+    if let Ok(f) = txt.parse::<f64>() {
+        // Rust accepts "inf"/"nan"/"infinity"; PICO-8 does not.
+        if txt.bytes().any(|b| b.is_ascii_digit()) {
+            return Some(f);
+        }
+        return None;
+    }
+    let (neg, rest) = match txt.strip_prefix('-') {
+        Some(r) => (true, r),
+        None => (false, txt),
+    };
+    let radix_val = if let Some(h) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
+        parse_radix_fraction(h, 16)
+    } else if let Some(b) = rest.strip_prefix("0b").or_else(|| rest.strip_prefix("0B")) {
+        parse_radix_fraction(b, 2)
+    } else {
+        None
+    }?;
+    Some(if neg { -radix_val } else { radix_val })
+}
+
+fn parse_radix_fraction(s: &str, radix: u32) -> Option<f64> {
+    let (int_part, frac_part) = match s.split_once('.') {
+        Some((i, f)) => (i, f),
+        None => (s, ""),
+    };
+    if int_part.is_empty() && frac_part.is_empty() {
+        return None;
+    }
+    let mut v: f64 = 0.0;
+    for c in int_part.chars() {
+        v = v * radix as f64 + c.to_digit(radix)? as f64;
+    }
+    let mut scale = 1.0 / radix as f64;
+    for c in frac_part.chars() {
+        v += c.to_digit(radix)? as f64 * scale;
+        scale /= radix as f64;
+    }
+    Some(v)
+}
+
 fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let s = arg_str(&a, 0).unwrap_or_else(|| Rc::from(&[][..]));
     let convert = if a.len() <= 2 || matches!(a.get(2), Some(Value::Nil)) {
@@ -840,10 +892,7 @@ fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
             let end = (pos + n).min(s.len());
             let part = &s[pos..end];
             let v = if convert {
-                match std::str::from_utf8(part)
-                    .ok()
-                    .and_then(|x| x.parse::<f64>().ok())
-                {
+                match split_token_to_number(part) {
                     Some(f) => num(f),
                     None => Value::Str(Rc::from(part)),
                 }
@@ -875,10 +924,7 @@ fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         if s[i..i + sep.len()] == sep[..] {
             let part = &s[start..i];
             let v = if convert {
-                match std::str::from_utf8(part)
-                    .ok()
-                    .and_then(|x| x.parse::<f64>().ok())
-                {
+                match split_token_to_number(part) {
                     Some(f) => num(f),
                     None => Value::Str(Rc::from(part)),
                 }
@@ -895,10 +941,7 @@ fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     }
     let part = &s[start..];
     let v = if convert {
-        match std::str::from_utf8(part)
-            .ok()
-            .and_then(|x| x.parse::<f64>().ok())
-        {
+        match split_token_to_number(part) {
             Some(f) => num(f),
             None => Value::Str(Rc::from(part)),
         }
