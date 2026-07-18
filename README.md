@@ -131,11 +131,7 @@ cargo test --test conformance                        # every probe must match it
 
 Goldens are checked in, so CI and contributors never need the PICO-8 binary. `tests/conformance/LEDGER.md` is the running log of every divergence found and fixed, with the evidence for each.
 
-## Compatibility
-
-Measured against a corpus of **188 BBS carts**: **187 run clean; the remaining 1 fails identically on the official binary** (it's listed in `tests/conformance/broken_on_official.txt`, where an error exit *is* the conformant outcome). That includes heavyweights like embedded LISP VMs, LZW self-decompressors, multi-cart loaders, and coroutine-driven frame loops.
-
-**Known limitations:**
+## Known limitations
 - **`tline()` draws nothing** — parsed and callable, but its raster algorithm hasn't been oracle-verified yet, so it's a deliberate no-op rather than a wrong guess.
 - **No coroutines on the WASM build** (no threads there; native builds have them via OS threads).
 - **Frame pacing** — `_set_fps()` and `menuitem()` are accepted but inert; the host drives the frame rate.
