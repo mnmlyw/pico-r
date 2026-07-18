@@ -147,20 +147,16 @@ impl LuaEngine for LuaImpl {
             upvalues: Vec::new(),
         });
 
-        // Install the env-fallback shim before user code runs (so `all()` results
-        // used as _ENV resolve globals via __index=_ENV; official PICO-8 has no
-        // _G at all, confirmed via oracle). PICO-Z does this via Lua source; we
-        // replicate it.
-        let shim = b"do local mt={__index=_ENV} local rawall=all local rawforeach=foreach \
-            local sm=setmetatable local gm=getmetatable local tp=type \
-            local function wrap(v) if tp(v)==\"table\" and not gm(v) then sm(v,mt) end return v end \
-            all=function(t) local it=rawall(t) return function(s,c) return wrap(it(s,c)) end,t end \
-            foreach=function(t,f) return rawforeach(t,function(v) return f(wrap(v)) end) end end";
-        if let Err(e) = run_str(&mut self.interp, shim) {
-            // shim failure shouldn't abort cart load
-            let _ = e;
-        }
-
+        // NOTE: an earlier PICO-Z-inherited shim wrapped every metatable-less
+        // table yielded by all()/foreach() with `{__index=_ENV}` so elements
+        // used as `_ENV` could still reach builtins. That wrapping is NOT
+        // official behavior and leaked globals into ordinary field misses
+        // (`n.next` on a table without a `next` field returned the BUILTIN
+        // next function -- buttworm-0.p8.png crashed indexing it). Real
+        // `local _ENV` scoping is implemented in the interpreter now, and
+        // carts that iterate `for _ENV in all(t)` set their own metatable
+        // chains to a captured outer _ENV (they'd crash on official
+        // otherwise) -- so no shim.
         let result = self.interp.execute_block(&chunk);
         self.interp.frames.pop();
         self.interp.host = std::ptr::null_mut();
