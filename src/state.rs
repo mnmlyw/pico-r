@@ -35,6 +35,9 @@ pub struct PicoState {
     /// a headless host counts sustained polling as synthetic frames so
     /// the flip budget still ends the loop.
     pub btn_poll_count: u32,
+    /// Bytes queued via serial() -- stat(108) reports this (confirmed via
+    /// oracle: each serial(0x808,addr,len) call adds len).
+    pub serial_queued: u32,
 }
 
 impl Default for PicoState {
@@ -62,6 +65,7 @@ impl PicoState {
             flip_count: 0,
             flip_limit: 0,
             btn_poll_count: 0,
+            serial_queued: 0,
         }
     }
 
@@ -75,5 +79,6 @@ impl PicoState {
         self.line_valid = false;
         self.flip_count = 0;
         self.btn_poll_count = 0;
+        self.serial_queued = 0;
     }
 }

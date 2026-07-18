@@ -1887,6 +1887,7 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         // be reproduced deterministically in tests, so return a fixed,
         // plausible timestamp rather than nil (which crashed carts that
         // concatenate the components).
+        108 => num(st.serial_queued as f64),
         80 | 90 => num(2024.0),
         81 | 91 => num(1.0),
         82 | 92 => num(1.0),
@@ -2046,7 +2047,11 @@ fn api_set_fps(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 // a real (if obscure) API function via oracle. Stubbed as a no-op: it has
 // no meaningful effect without an actual host-side serial/file channel to
 // write to, which this engine doesn't implement.
-fn api_serial(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+fn api_serial(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    // Queue accounting only: stat(108) reports cumulative bytes queued
+    // (confirmed via oracle -- each serial(ch,addr,len) call adds len).
+    let len = opt_int(&a, 2, 0).max(0) as u32;
+    i.host().serial_queued = i.host().serial_queued.saturating_add(len);
     Ok(vec![])
 }
 /// Marker message for a flip() call past the host's frame budget --

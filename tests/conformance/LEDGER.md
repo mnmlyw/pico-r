@@ -365,3 +365,9 @@ Corpus re-sweep: **178/188 clean** (up from 177) — **zero regressions**. One f
 - **`#` (and `unpack()`, which uses it) now follows Lua's luaH_getn border search instead of stopping at the first nil hole.** Oracle-confirmed across five table shapes: `#{1,2,nil,4,5}` is 5 (holes spanned), sparse `u[1] u[2] u[4] u[5]` is 5, a lone `u[1000]=1` is 0, `{1,2,3}` plus `w[1000]=1` is 3, and `z[3]=1` alone is 0. The old first-hole scan silently truncated any `unpack()` destructuring of containers with nil fields (`local cx,cy,w,h,pad,... = unpack(self)` — fakogejuzo-0.p8.png, which still fails on a separate nil elsewhere but now destructures correctly). Implemented as the same doubling-probe + binary-search border find real Lua uses. | `src/pico_lua/value.rs` (`raw_len`)
 
 Corpus re-sweep: **178/188 clean** (unchanged) — **zero regressions**; `driftmania-5.p8.png` progressed from TIMEOUT to UPDATE_ERROR.
+
+### Follow-up: pushing toward 100% clean — stat(108) serial-queue accounting (round 30)
+
+- **`stat(108)` reports cumulative bytes queued via `serial()` — implemented and oracle-confirmed** (each `serial(ch,addr,len)` adds `len`; previously the generic 0 fallback). This is the pacing signal `bytebeat_tweet-0.p8.png`'s audio loop watches (`while stat(108)<1000 do ... serial(...) end`); the queue now counts correctly, though that cart still can't terminate headlessly — its outer loop paces on the queue DRAINING in real time as audio plays, which has no headless analogue (documented as out-of-scope for the harness, like real-time flip pacing before the frame-budget work). | `src/state.rs`, `src/pico_lua/api.rs` (`api_serial`, `api_stat`)
+
+Corpus re-sweep: **178/188 clean** (unchanged) — **zero regressions**.
