@@ -3,8 +3,8 @@
 // Design choices:
 //  - Tree-walking, not bytecode. Cart code runs once per frame for _update +
 //    _draw; throughput is dwarfed by graphics work.
-//  - No coroutines (carts using flip() won't work; the dominant
-//    _init/_update/_draw pattern does).
+//  - Real coroutines via baton-passing OS threads (see coroutine.rs);
+//    explicit-flip main loops run under a host frame budget headlessly.
 //  - Numbers are f64. PICO-8's 16:16 fixed-point semantics are emulated only
 //    where they leak into the API surface (band/bor/shl/etc, peek4/poke4,
 //    tostr/tonum hex flags). Pure-arithmetic carts won't notice, but
