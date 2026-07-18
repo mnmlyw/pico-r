@@ -1,0 +1,4 @@
+RESULT x 2
+RESULT y 4
+RESULT shl_comment 8
+DONE

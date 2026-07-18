@@ -290,7 +290,10 @@ fn process_line(
             continue;
         }
 
-        if print_shorthand_active && ch == b'-' && i + 1 < line.len() && line[i + 1] == b'-' {
+        if print_shorthand_active
+            && i + 1 < line.len()
+            && ((ch == b'-' && line[i + 1] == b'-') || (ch == b'/' && line[i + 1] == b'/'))
+        {
             out.push(b')');
             print_shorthand_active = false;
         }
@@ -328,6 +331,14 @@ fn process_line(
                 }
             }
             out.extend_from_slice(&line[i..]);
+            return;
+        }
+
+        // PICO-8 also accepts C-style `//` line comments (confirmed via
+        // oracle) -- rewrite to `--` so the real Lua lexer accepts it.
+        if ch == b'/' && i + 1 < line.len() && line[i + 1] == b'/' {
+            out.extend_from_slice(b"--");
+            out.extend_from_slice(&line[i + 2..]);
             return;
         }
 
@@ -654,7 +665,9 @@ fn find_own_separator(line: &[u8], start: usize) -> Option<usize> {
             i += 1;
             continue;
         }
-        if ch == b'-' && i + 1 < line.len() && line[i + 1] == b'-' {
+        if i + 1 < line.len()
+            && ((ch == b'-' && line[i + 1] == b'-') || (ch == b'/' && line[i + 1] == b'/'))
+        {
             return None;
         }
         if matches!(ch, b'(' | b'[' | b'{') {
@@ -727,12 +740,16 @@ fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
             continue;
         }
 
-        if ch == b'-' && i + 1 < line.len() && line[i + 1] == b'-' {
-            // A `--` comment runs to end of line, so any still-pending
-            // synthetic `end`s must be emitted BEFORE it -- appending them
-            // after the loop (the normal path) would bury them inside the
-            // comment text. Confirmed on a real corpus cart
-            // (dinkykong-0.p8.png: `if(not cstg.hr)return true --todo:...`).
+        if i + 1 < line.len()
+            && ((ch == b'-' && line[i + 1] == b'-') || (ch == b'/' && line[i + 1] == b'/'))
+        {
+            // A `--` (or PICO-8's C-style `//`) comment runs to end of
+            // line, so any still-pending synthetic `end`s must be emitted
+            // BEFORE it -- appending them after the loop (the normal path)
+            // would bury them inside the comment text. Confirmed on a real
+            // corpus cart (dinkykong-0.p8.png: `if(not cstg.hr)return true
+            // --todo:...`). The `//` form is copied verbatim here;
+            // process_line rewrites it to `--` afterward.
             for _ in 0..ends_needed {
                 result.extend_from_slice(b" end");
             }
@@ -1143,12 +1160,18 @@ fn extract_rhs(line: &[u8], start: usize) -> RhsResult<'_> {
             i += 1;
             continue;
         }
-        if ch == b'-' && i + 1 < line.len() && line[i + 1] == b'-' {
+        if i + 1 < line.len()
+            && ((ch == b'-' && line[i + 1] == b'-') || (ch == b'/' && line[i + 1] == b'/'))
+        {
             break;
         }
         // `?` is never valid inside an expression -- it always starts a new
-        // print-shorthand statement, so it's a hard stop like `;`.
-        if depth == 0 && ch == b'?' {
+        // print-shorthand statement, so it's a hard stop like `;`. A `;`
+        // itself likewise always terminates the statement -- without this,
+        // `i+=1;return ...` captured `1;` as the RHS and spliced the
+        // semicolon inside the rewritten parens (`i = i + (1;)`). Confirmed
+        // on a real corpus cart (picketpuzzle-5.p8.png).
+        if depth == 0 && (ch == b'?' || ch == b';') {
             break;
         }
         if ch == b'(' || ch == b'[' {
@@ -1398,6 +1421,16 @@ fn extract_bitwise_rhs(line: &[u8], start: usize) -> ExprResult<'_> {
             in_str = ch;
             i += 1;
             continue;
+        }
+        // A `--` (or PICO-8's C-style `//`) comment runs to end of line --
+        // hard stop, or the captured RHS smuggles the comment into the
+        // rewritten call and the comment eats the closing paren
+        // (`1 << 3--will not swap` became `shl(1,3--will) ...`). Confirmed
+        // on a real corpus cart (swap_mouse-8.p8.png).
+        if i + 1 < line.len()
+            && ((ch == b'-' && line[i + 1] == b'-') || (ch == b'/' && line[i + 1] == b'/'))
+        {
+            break;
         }
         // `?` is never valid inside an expression -- it always starts a new
         // print-shorthand statement, so it's a hard stop like `;`.

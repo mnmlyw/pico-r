@@ -65,8 +65,19 @@ impl Parser {
     }
 
     fn err(&self, msg: &str) -> ParseError {
+        // Opt-in context dump for conformance debugging: shows the tokens
+        // around the failure point so a parse error inside a 8000-char
+        // golfed line can be located without bisecting the source.
+        let msg = if std::env::var_os("PICOR_PARSE_DEBUG").is_some() {
+            let lo = self.pos.saturating_sub(6);
+            let hi = (self.pos + 6).min(self.toks.len());
+            let ctx: Vec<_> = self.toks[lo..hi].iter().map(|t| &t.tok).collect();
+            format!("{} [ctx: {:?}]", msg, ctx)
+        } else {
+            msg.into()
+        };
         ParseError {
-            msg: msg.into(),
+            msg,
             line: self.line(),
         }
     }
