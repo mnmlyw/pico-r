@@ -1,0 +1,5 @@
+RESULT peek_or 255
+RESULT peek_and 15
+RESULT peek_bxor 3
+RESULT peek_exp 1
+DONE

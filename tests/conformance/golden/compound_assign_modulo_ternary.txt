@@ -1,0 +1,2 @@
+RESULT modulo_ternary_compound 1
+DONE

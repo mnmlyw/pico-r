@@ -1110,7 +1110,16 @@ fn extract_rhs(line: &[u8], start: usize) -> RhsResult<'_> {
                             break;
                         }
                     }
-                    if lhs_start > rhs_start {
+                    // A Lua identifier can't start with a digit, so a
+                    // candidate like `...h%1==0` (scanning back from `1`)
+                    // is just a number literal inside an expression, not
+                    // the start of a new glued-together statement's LHS
+                    // (e.g. real `x=1y=2`). Confirmed against a real
+                    // corpus cart (pico1karena-0.p8.png: `a[...]+=
+                    // h%1==0and 1or 0` was wrongly cut down to RHS `h%`).
+                    let starts_with_identifier =
+                        line[lhs_start].is_ascii_alphabetic() || line[lhs_start] == b'_';
+                    if lhs_start > rhs_start && starts_with_identifier {
                         let mut stop = lhs_start;
                         while stop > rhs_start
                             && (line[stop - 1] == b' ' || line[stop - 1] == b'\t')
@@ -1207,7 +1216,18 @@ fn extract_simple_expr(line: &[u8], start: usize) -> ExprResult<'_> {
                     | b'~'
                     | b'}'
                     | b'{'
+                    | b'&'
+                    | b'|'
             ) {
+                break;
+            }
+            // `^^` (bxor) is dialect sugar applied to the peek() result, not
+            // part of the address expression -- `@addr^^mask` must become
+            // `peek(addr)^^mask`, confirmed against official PICO-8 (unlike
+            // plain `^`, which IS real Lua exponentiation and stays part of
+            // the address expression: `@addr^2` really means `peek(addr^2)`,
+            // confirmed the same way -- so only the doubled form stops here).
+            if ch == b'^' && i + 1 < line.len() && line[i + 1] == b'^' {
                 break;
             }
             if ch.is_ascii_alphabetic() && is_statement_keyword(line, i) {
