@@ -1472,12 +1472,30 @@ fn try_bitwise_op(
         return None;
     }
 
+    // Recursively preprocess the RHS so nested transforms (binary
+    // literals, backslash int-div, etc.) inside it get applied -- it was
+    // previously copied verbatim from the untransformed source, so e.g.
+    // `fget(s) & 0b11010011` left the binary literal un-decoded, which
+    // the real Lua lexer can't parse. Confirmed on real corpus carts
+    // (sujurejaba-0.p8.png, spirit_solstice-9.p8.png and others:
+    // `<expr> & 0b<literal> <comparison>`).
+    let processed_rhs_string: String = {
+        let s = unsafe { core::str::from_utf8_unchecked(rhs_info.expr) };
+        let p = preprocess(s);
+        let bytes = p.as_bytes();
+        let mut end = bytes.len();
+        while end > 0 && bytes[end - 1] == b'\n' {
+            end -= 1;
+        }
+        String::from(unsafe { core::str::from_utf8_unchecked(&bytes[..end]) })
+    };
+
     out.truncate(out.len() - lhs_result.remove_count);
     out.extend_from_slice(func_name);
     out.push(b'(');
     out.extend_from_slice(lhs);
     out.push(b',');
-    out.extend_from_slice(rhs_info.expr);
+    out.extend_from_slice(processed_rhs_string.as_bytes());
     out.push(b')');
     Some(rhs_info.end)
 }

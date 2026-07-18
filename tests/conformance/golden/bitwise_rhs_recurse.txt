@@ -1,0 +1,3 @@
+RESULT binary_literal_rhs false
+RESULT nested_intdiv_rhs 0
+DONE
