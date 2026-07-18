@@ -579,8 +579,45 @@ impl Interp {
         }
     }
 
+    fn metamethod(v: &Value, name: &[u8]) -> Option<Value> {
+        let Value::Table(t) = v else {
+            return None;
+        };
+        let mt = t.borrow().metatable.clone()?;
+        let f = mt.borrow().get(&Value::Str(Rc::from(name)));
+        if matches!(f, Value::Nil) {
+            None
+        } else {
+            Some(f)
+        }
+    }
+
     fn apply_binop(&mut self, op: BinOp, a: Value, b: Value) -> Result<Value, RtError> {
         use BinOp::*;
+        // Confirmed against official PICO-8 (the manual's own worked
+        // example redefines `+` via __add for 2D vectors): arithmetic and
+        // concat operators consult a table operand's metatable before
+        // falling back to raw number/string coercion, matching standard
+        // Lua semantics -- try `a`'s metamethod first, then `b`'s.
+        let mm_name: Option<&[u8]> = match op {
+            Add => Some(b"__add"),
+            Sub => Some(b"__sub"),
+            Mul => Some(b"__mul"),
+            Div => Some(b"__div"),
+            Mod => Some(b"__mod"),
+            Pow => Some(b"__pow"),
+            Concat => Some(b"__concat"),
+            _ => None,
+        };
+        if let Some(name) = mm_name {
+            if matches!(a, Value::Table(_)) || matches!(b, Value::Table(_)) {
+                let mm = Self::metamethod(&a, name).or_else(|| Self::metamethod(&b, name));
+                if let Some(f) = mm {
+                    let mut r = self.call_value(&f, vec![a, b])?;
+                    return Ok(r.drain(..).next().unwrap_or(Value::Nil));
+                }
+            }
+        }
         match op {
             Add | Sub | Mul | Div | Mod | Pow => {
                 let x = a

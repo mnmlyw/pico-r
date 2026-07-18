@@ -1011,22 +1011,38 @@ fn api_all(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
     // Closure-captured state. Generic-for passes (state, control) but we
     // ignore both — the captured state is the source of truth. This keeps
     // us robust to the env-fallback `wrap` shim that re-wraps `all`.
-    let state: Rc<RefCell<(Rc<Table>, i64, i64)>> =
-        Rc::new(RefCell::new((Rc::clone(&t), 0i64, t.borrow().raw_len())));
+    //
+    // del()-during-iteration (a very common PICO-8 pattern) must not skip
+    // or double-visit items. Tracking just "did the length shrink" isn't
+    // enough to tell WHERE the shrink happened: deleting the current item
+    // shifts later items down into this same index (must re-visit it),
+    // but deleting a later item leaves this index's content unchanged
+    // (must advance normally) -- confirmed against official PICO-8 that
+    // the two cases differ. So remember the last-returned VALUE, not just
+    // the index, and re-check whether that position still holds it.
+    type AllIterState = RefCell<(Rc<Table>, i64, Option<Value>)>;
+    let state: Rc<AllIterState> = Rc::new(RefCell::new((Rc::clone(&t), 0i64, None)));
     let iter = Value::Function(Function::Native(Rc::new(NativeFn {
         name: "all_iter",
         func: Box::new(move |_i, _args| {
             let mut st = state.borrow_mut();
             let tref = Rc::clone(&st.0);
             let len = tref.borrow().raw_len();
-            // Only advance if no deletions occurred during the callback
-            let next_idx = if len >= st.2 { st.1 + 1 } else { st.1 };
-            if next_idx > len {
+            let last_idx = st.1;
+            let advance = match &st.2 {
+                None => true,
+                Some(last_val) => {
+                    let now_at_last_idx = tref.borrow().get(&num(last_idx as f64));
+                    now_at_last_idx.raw_equal(last_val)
+                }
+            };
+            let next_idx = if advance { last_idx + 1 } else { last_idx };
+            if next_idx < 1 || next_idx > len {
                 return Ok(vec![nil()]);
             }
-            st.1 = next_idx;
-            st.2 = len;
             let v = tref.borrow().get(&num(next_idx as f64));
+            st.1 = next_idx;
+            st.2 = Some(v.clone());
             Ok(vec![v])
         }),
     })));

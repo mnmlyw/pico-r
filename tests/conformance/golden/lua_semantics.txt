@@ -1,0 +1,8 @@
+RESULT del_later_seen 123
+RESULT del_current_seen 123
+RESULT del_evens_seen 12345
+RESULT add 13
+RESULT sub 7
+RESULT mul 30
+RESULT concat concat!
+DONE
