@@ -1887,6 +1887,20 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         // be reproduced deterministically in tests, so return a fixed,
         // plausible timestamp rather than nil (which crashed carts that
         // concatenate the components).
+        // Devkit keyboard: stat(30) is the has-pending-key FLAG (false,
+        // a boolean -- the old generic 0 fallback was TRUTHY in Lua and
+        // made `while stat(30) do ... end` key-drain loops spin forever,
+        // terra_1cart-42.p8.png); stat(31) is the pending key ("").
+        // Both oracle-confirmed.
+        30 => boolv(false),
+        31 => str_v(b""),
+        // stat(28,code): raw keyboard scancode held? stat(120)/stat(121):
+        // stdin/serial data pending? All false headlessly, and all
+        // BOOLEANS on official (oracle-confirmed) -- the generic numeric
+        // 0 fallback is truthy in Lua and spun `while stat(120) do`-style
+        // drain loops forever.
+        28 => boolv(false),
+        120 | 121 => boolv(false),
         108 => num(st.serial_queued as f64),
         80 | 90 => num(2024.0),
         81 | 91 => num(1.0),

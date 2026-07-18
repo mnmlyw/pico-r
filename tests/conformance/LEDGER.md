@@ -371,3 +371,9 @@ Corpus re-sweep: **178/188 clean** (unchanged) — **zero regressions**; `driftm
 - **`stat(108)` reports cumulative bytes queued via `serial()` — implemented and oracle-confirmed** (each `serial(ch,addr,len)` adds `len`; previously the generic 0 fallback). This is the pacing signal `bytebeat_tweet-0.p8.png`'s audio loop watches (`while stat(108)<1000 do ... serial(...) end`); the queue now counts correctly, though that cart still can't terminate headlessly — its outer loop paces on the queue DRAINING in real time as audio plays, which has no headless analogue (documented as out-of-scope for the harness, like real-time flip pacing before the frame-budget work). | `src/state.rs`, `src/pico_lua/api.rs` (`api_serial`, `api_stat`)
 
 Corpus re-sweep: **178/188 clean** (unchanged) — **zero regressions**.
+
+### Follow-up: pushing toward 100% clean — devkit/serial stats are booleans (round 31)
+
+- **`stat(30)` (devkit key pending), `stat(31)` (pending key), `stat(28,code)` (raw scancode held), `stat(120)`/`stat(121)` (stdin/serial data pending) implemented with their oracle-confirmed types: booleans (false) and empty string.** The generic numeric-0 fallback was TRUTHY in Lua, so `while stat(30) do ... end` key-drain loops spun forever. `terra_1cart-42.p8.png` gets past those loops now but still hangs inside a map-generation `repeat ... until mget(...)` loop in `_init` — a deeper divergence not yet located. | `src/pico_lua/api.rs` (`api_stat`)
+
+Corpus re-sweep: **178/188 clean** (unchanged) — **zero regressions**.
