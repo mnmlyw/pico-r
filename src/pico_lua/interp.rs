@@ -630,6 +630,9 @@ impl Interp {
                 }
             }
         }
+        // Record the positional span INCLUDING nil slots (see
+        // `TableInner::array_decl`).
+        t.borrow_mut().array_decl = auto_idx - 1;
         Ok(Value::Table(t))
     }
 

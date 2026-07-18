@@ -396,3 +396,9 @@ Located via the new key-carrying index-error message (`attempt to index a number
 - Also: index errors now name the key (`(key "h")`), matching the diagnostic spirit of official's "attempt to index field 'h'" and making this class of bug findable in seconds. | `src/pico_lua/interp.rs` (`table_get`)
 
 Corpus re-sweep: **182/188 clean** (up from 179) — **zero regressions**. Three full clean fixes: `driftmania-5.p8.png`, and — previously misattributed to the deferred fixed-point epic — `picodex_dual-1.p8.png` and `super_world_of_goo-6.p8.png`, whose decompressor failures were this same stale-capture bug all along.
+
+### Follow-up: pushing toward 100% clean — constructor nil-span for `#`/unpack (round 34)
+
+- **A table constructor's positional span now counts nil slots, and the border search consults it the way luaH_getn consults Lua's array-part size.** `{...}` from varargs `(nil,nil,49,nil,1,nil,nil,"x")` places every value at its correct index but left `t[1]` empty, so the plain border search reported `#t == 0` and `unpack()` returned nothing — official reports 8 (the constructor pre-sizes the array part). `TableInner` now records the constructor-declared span (`array_decl`); the border search starts there (extending upward for appended elements, or binary-searching within the span when its last slot is nil). Oracle-verified (`probes/vararg_nil_span.p8`). This was the real cause of `fakogejuzo-0.p8.png`'s "compare nil with number": its `new_type` class helper builds objects as `container(nil,nil,49,nil,1,...)` and destructures with `unpack(self)`. | `src/pico_lua/value.rs` (`array_decl`, `raw_len`), `src/pico_lua/interp.rs` (`eval_table`)
+
+Corpus re-sweep: **183/188 clean** (up from 182) — **zero regressions**. One full clean fix (`fakogejuzo-0.p8.png`).

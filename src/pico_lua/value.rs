@@ -33,6 +33,12 @@ pub struct TableInner {
     /// Tracks the largest sequential integer key written, for `#t`.
     /// We rebuild lazily.
     pub array_max_hint: u32,
+    /// Positional span declared by a table constructor, COUNTING nil
+    /// slots (`{nil,nil,49}` declares 3). Real Lua pre-sizes the array
+    /// part to this, which is what makes `#{...}` from varargs with
+    /// leading nils report the full span -- the border search consults
+    /// this the way luaH_getn consults the array-part size.
+    pub array_decl: i64,
     pub metatable: Option<Rc<Table>>,
 }
 
@@ -47,6 +53,7 @@ impl TableInner {
         Self {
             map: HashMap::new(),
             array_max_hint: 0,
+            array_decl: 0,
             metatable: None,
         }
     }
@@ -89,6 +96,45 @@ impl TableInner {
         // fakogejuzo-0.p8.png). Doubling probe then binary search for a
         // border t[i]~=nil, t[i+1]==nil.
         let has = |i: i64| self.map.contains_key(&Key::Int(i));
+        // Constructor-declared span first (see `array_decl`): if the last
+        // declared slot is filled, the border is at least there (keep
+        // searching upward for appended elements); if it's a nil hole,
+        // binary-search the border inside the declared span -- exactly
+        // luaH_getn's array-part handling.
+        if self.array_decl > 0 {
+            if !has(self.array_decl) {
+                let mut i: i64 = 0;
+                let mut j: i64 = self.array_decl;
+                while j - i > 1 {
+                    let m = (i + j) / 2;
+                    if has(m) {
+                        i = m;
+                    } else {
+                        j = m;
+                    }
+                }
+                return i;
+            }
+            // fall through with the search starting at the declared end
+            let mut i: i64 = self.array_decl;
+            let mut j: i64 = self.array_decl + 1;
+            while has(j) {
+                i = j;
+                if j > i64::MAX / 2 {
+                    break;
+                }
+                j *= 2;
+            }
+            while j - i > 1 {
+                let m = (i + j) / 2;
+                if has(m) {
+                    i = m;
+                } else {
+                    j = m;
+                }
+            }
+            return i;
+        }
         if !has(1) {
             return 0;
         }
