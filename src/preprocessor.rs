@@ -521,7 +521,14 @@ fn is_prev_value(line: &[u8], pos: usize) -> bool {
         return false;
     }
     let prev = line[pos - 1];
-    prev.is_ascii_alphanumeric() || prev == b'_' || prev == b')' || prev == b']'
+    // A high-byte P8SCII glyph expands to a synthetic `_p8_XX` identifier
+    // (see the `ch >= 0x80` handling in `process_line`), so it counts as
+    // value-like context too -- otherwise a glyph directly followed by `%`
+    // was misclassified as the peek2-shortcut instead of modulo (the raw
+    // byte isn't ASCII-alphanumeric, even though the identifier it expands
+    // to clearly is a value). Confirmed against a real corpus cart
+    // (batazubipe-0.p8.png: a glyph directly followed by `%40`).
+    prev.is_ascii_alphanumeric() || prev == b'_' || prev == b')' || prev == b']' || prev >= 0x80
 }
 
 fn parse_binary_literal(s: &[u8]) -> f64 {
@@ -1614,6 +1621,18 @@ fn try_peek_shortcut(line: &[u8], pos: usize, out: &mut Vec<u8>) -> Option<usize
     let info = extract_simple_expr(line, pos + 1);
     if info.expr.is_empty() {
         return None;
+    }
+    // Size-golfed carts glue `@`/`%`/`$` directly onto a preceding keyword
+    // with no separator (`if$24064~=0then?...`). Splicing in `peek(`/
+    // `peek2(`/`peek4(` verbatim would fuse the keyword and the function
+    // name into a single bad identifier for the real Lua lexer (`ifpeek4`)
+    // -- insert a space when the preceding byte demands it. Confirmed
+    // against a real corpus cart (redash-7.p8.png).
+    if out
+        .last()
+        .is_some_and(|&b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        out.push(b' ');
     }
     out.extend_from_slice(func_name);
     out.push(b'(');

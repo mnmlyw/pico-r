@@ -1,0 +1,3 @@
+RESULT dollar_glue_no
+RESULT at_glue ok
+DONE
