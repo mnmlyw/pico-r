@@ -183,6 +183,12 @@ impl Interp {
         if block.line > 0 {
             self.current_line = block.line;
         }
+        // Live-locals count observed the last time each label statement was
+        // passed. A backward goto must close only locals declared AFTER the
+        // label -- locals declared before it stay in scope (real Lua
+        // semantics; a real corpus cart declares `local lin=...` before a
+        // `::light_ov::` label it later jumps back to, hotwax-5.p8.png).
+        let mut label_locals: Vec<Option<usize>> = vec![None; block.stats.len()];
         let result = loop {
             if i >= block.stats.len() {
                 break Ok(Flow::Normal);
@@ -193,6 +199,9 @@ impl Interp {
                 }
             }
             let stat = &block.stats[i];
+            if matches!(stat, Stat::Label(_)) {
+                label_locals[i] = Some(self.frames.last().map(|f| f.locals.len()).unwrap_or(0));
+            }
             match self.execute_statement(stat) {
                 Ok(Flow::Normal) => {
                     i += 1;
@@ -209,9 +218,14 @@ impl Interp {
                         }
                     }
                     if let Some(idx) = found {
-                        // Restore locals to start-of-block (basic approach)
-                        if let Some(frame) = self.frames.last_mut() {
-                            frame.locals.truncate(saved_locals);
+                        // Backward jump: restore the locals that were live
+                        // at the label. Forward jump (label not yet passed):
+                        // keep current locals -- the skipped declarations
+                        // simply never happen.
+                        if let Some(target_len) = label_locals[idx] {
+                            if let Some(frame) = self.frames.last_mut() {
+                                frame.locals.truncate(target_len.max(saved_locals));
+                            }
                         }
                         i = idx + 1;
                     } else {

@@ -335,3 +335,9 @@ Discovered while chasing `ascent-0.p8.png`'s "arith on nil": `cart.lua_code` was
 - `extract_lhs` treats bytes ≥0x80 as identifier characters in its backward scan (a glyph value's int-div/bitwise rewrite captured an empty LHS otherwise).
 
 Corpus re-sweep: **170/188 clean** (up from 168) — **zero regressions**. Three full clean fixes across the two sub-rounds (`ascent-0.p8.png` — its "arith on nil" was two distinct glyph counters aliased into one variable; `pico1kshmup_1-0.p8.png`; plus the earlier `puzzlesofthepaladin-3.p8.png` hold); `fakogejuzo-0.p8.png` progressed from TIMEOUT to DRAW_ERROR and `to_take_root_among_the_stars_1-7.p8.png` to UPDATE_ERROR.
+
+### Follow-up: pushing toward 100% clean — backward goto dropped in-scope locals (round 25)
+
+- **A backward `goto` truncated ALL of the enclosing block's locals instead of only those declared after the target label — fixed.** Real Lua closes only locals whose scope begins after the label; the old "restore to start-of-block" shortcut nil'd out locals a loop-via-goto still needed (`local lin=tb[y]` before `::light_ov::`, jumped back to from inside a pairs() loop — hotwax-5.p8.png). The interpreter now records the live-locals count each time a label statement is passed and truncates to that on a backward jump; a forward jump (label not yet passed) keeps current locals, since the skipped declarations simply never execute. Both directions oracle-verified (`probes/goto_preserves_locals.p8`). | `src/pico_lua/interp.rs` (`execute_block_inner`)
+
+Corpus re-sweep: **171/188 clean** (up from 170) — **zero regressions**. One full clean fix (`hotwax-5.p8.png`). Also batch-classified all remaining non-clean carts against the official binary this round: every one except `basicshmupdc1-0.p8.png` (the known unterminated-long-comment cart) RUNS on official — so the strict-exit-code achievable maximum is 187/188, with `basicshmupdc1` conformant-by-matching-error.
