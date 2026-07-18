@@ -261,6 +261,7 @@ pub fn register_all(globals: &Rc<Table>) {
     set("flip", api_flip);
     set("_set_fps", api_set_fps);
     set("serial", api_serial);
+    set("readrom", api_readrom);
     set("reset", api_reset);
     set("stop", api_stop);
 }
@@ -2075,6 +2076,23 @@ fn api_set_fps(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 // a real (if obscure) API function via oracle. Stubbed as a no-op: it has
 // no meaningful effect without an actual host-side serial/file channel to
 // write to, which this engine doesn't implement.
+// `readrom(addr, len)` -- returns `len` bytes of cart ROM as a string.
+// NOTE: not oracle-lockable -- the 0.2.7 official binary reports readrom
+// as nil under `-x` (headless export) even though it works in normal
+// mode and is documented; implemented to the documented semantics
+// because samurise-1.p8.png's embedded LISP VM boots its stdlib with
+// `(parens8 (readrom 0x2000 0x0fa3))`.
+fn api_readrom(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    let addr = arg_addr(&a, 0) as usize;
+    let len = opt_int(&a, 1, 0).max(0) as usize;
+    let rom = &i.host().memory.rom;
+    let end = (addr + len).min(rom.len());
+    if addr >= end {
+        return Ok(vec![str_v(b"")]);
+    }
+    Ok(vec![str_v(&rom[addr..end])])
+}
+
 fn api_serial(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     // Queue accounting only: stat(108) reports cumulative bytes queued
     // (confirmed via oracle -- each serial(ch,addr,len) call adds len).

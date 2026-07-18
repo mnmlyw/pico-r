@@ -28,8 +28,88 @@ impl fmt::Debug for Value {
     }
 }
 
+/// Insertion-ordered map with a HashMap-compatible surface. PICO-8's
+/// `pairs()`/`next()` iteration order is deterministic on real hardware
+/// (Lua's internal order, stable per table build); a randomized per-process
+/// HashMap order made carts whose logic depends on iteration order fail
+/// NONDETERMINISTICALLY (samurise-1.p8.png's embedded LISP VM failed with a
+/// different error on every run). Entries keep insertion order; removals
+/// leave tombstones that are compacted when they outnumber live entries.
+pub struct OrderedMap {
+    idx: HashMap<Key, usize>,
+    entries: Vec<Option<(Key, Value)>>,
+    live: usize,
+}
+
+impl OrderedMap {
+    pub fn new() -> Self {
+        Self {
+            idx: HashMap::new(),
+            entries: Vec::new(),
+            live: 0,
+        }
+    }
+    pub fn get(&self, k: &Key) -> Option<&Value> {
+        let &i = self.idx.get(k)?;
+        self.entries[i].as_ref().map(|(_, v)| v)
+    }
+    pub fn contains_key(&self, k: &Key) -> bool {
+        self.idx.contains_key(k)
+    }
+    pub fn insert(&mut self, k: Key, v: Value) -> Option<Value> {
+        if let Some(&i) = self.idx.get(&k) {
+            let slot = self.entries[i].as_mut().unwrap();
+            return Some(std::mem::replace(&mut slot.1, v));
+        }
+        self.idx.insert(k.clone(), self.entries.len());
+        self.entries.push(Some((k, v)));
+        self.live += 1;
+        None
+    }
+    pub fn remove(&mut self, k: &Key) -> Option<Value> {
+        let i = self.idx.remove(k)?;
+        let (_, v) = self.entries[i].take()?;
+        self.live -= 1;
+        if self.entries.len() > 8 && self.live * 2 < self.entries.len() {
+            self.compact();
+        }
+        Some(v)
+    }
+    fn compact(&mut self) {
+        let old = std::mem::take(&mut self.entries);
+        self.idx.clear();
+        for e in old.into_iter().flatten() {
+            self.idx.insert(e.0.clone(), self.entries.len());
+            self.entries.push(Some(e));
+        }
+    }
+    pub fn clear(&mut self) {
+        self.idx.clear();
+        self.entries.clear();
+        self.live = 0;
+    }
+    pub fn len(&self) -> usize {
+        self.live
+    }
+    pub fn is_empty(&self) -> bool {
+        self.live == 0
+    }
+    pub fn keys(&self) -> impl Iterator<Item = &Key> {
+        self.entries.iter().flatten().map(|(k, _)| k)
+    }
+    pub fn iter(&self) -> impl Iterator<Item = (&Key, &Value)> {
+        self.entries.iter().flatten().map(|(k, v)| (k, v))
+    }
+}
+
+impl Default for OrderedMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct TableInner {
-    pub map: HashMap<Key, Value>,
+    pub map: OrderedMap,
     /// Tracks the largest sequential integer key written, for `#t`.
     /// We rebuild lazily.
     pub array_max_hint: u32,
@@ -51,7 +131,7 @@ impl Default for TableInner {
 impl TableInner {
     pub fn new() -> Self {
         Self {
-            map: HashMap::new(),
+            map: OrderedMap::new(),
             array_max_hint: 0,
             array_decl: 0,
             metatable: None,

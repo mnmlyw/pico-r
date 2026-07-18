@@ -417,3 +417,11 @@ Located `samurise-1.p8.png`'s infinite loop with the upgraded PICOR_TRACE (state
 - **`all()` over a string iterates its characters as 1-char strings — implemented, oracle-confirmed** (`for c in all("abc")` yields a,b,c on real hardware; ours returned an empty iterator, so the scanner's char-set test never matched and `nil==nil` kept the advance loop alive forever). | `src/pico_lua/api.rs` (`api_all`)
 
 Corpus re-sweep: **183/188 clean** (unchanged) — **zero regressions**; `samurise-1.p8.png` progressed from the infinite TIMEOUT to a locatable LOAD_ERROR deeper in the VM's compile stage (`attempt to index a nil value (key 2)`), still under investigation.
+
+### Follow-up: pushing toward 100% clean — insertion-ordered tables, readrom (round 36)
+
+- **`pairs()`/`next()` iteration is now insertion-ordered and stable (the long-standing "HashMap ordering" LEDGER item).** samurise's embedded LISP VM failed with a DIFFERENT error on every run — the definitive symptom of iteration-order dependence — and is now fully deterministic. `TableInner.map` is a new `OrderedMap` (HashMap index into an insertion-ordered entry vec with tombstone compaction) exposing the same surface, so all 31 call sites compiled unchanged. | `src/pico_lua/value.rs`
+- **`readrom(addr, len)` implemented to documented semantics** (returns ROM bytes as a string). NOT oracle-lockable: the 0.2.7 official binary reports `readrom` as nil under `-x` even though it's documented and works interactively — noted in code. samurise's VM boots its LISP stdlib with `(parens8 (readrom 0x2000 0x0fa3))`. | `src/pico_lua/api.rs`
+- Top-level (load-stage) runtime errors now carry `cart:<line>` like the lifecycle-stage errors. | `src/pico_lua/mod.rs`
+
+Corpus re-sweep: **183/188 clean** (unchanged) — **zero regressions**. samurise now fails deterministically (`cart:141: attempt to index a nil value (key 2)`) inside its VM's compile stage — still open, but debuggable now.

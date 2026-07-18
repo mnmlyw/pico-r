@@ -168,7 +168,12 @@ impl LuaEngine for LuaImpl {
                 Ok(())
             }
             Err(e) => {
-                let msg = format_err(&e);
+                let msg = format!(
+                    "{}:{}: {}",
+                    self.interp.chunkname,
+                    self.interp.current_line,
+                    format_err(&e)
+                );
                 self.error = Some(msg.clone());
                 Err(msg)
             }
