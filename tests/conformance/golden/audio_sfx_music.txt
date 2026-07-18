@@ -1,0 +1,6 @@
+RESULT offset_oob_note 31
+RESULT mask0_ch0 5
+RESULT mask0_ch1 -1
+RESULT mask0_ch2 -1
+RESULT mask0_ch3 -1
+DONE

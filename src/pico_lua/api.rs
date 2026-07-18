@@ -1660,7 +1660,9 @@ fn api_sfx(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_music(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let pat = opt_int(&a, 0, -1);
     let fade = opt_int(&a, 1, 0);
-    let mask = opt_int(&a, 2, 0);
+    // -1 here means "omitted" (see play_music) -- distinct from an
+    // explicit 0, which means "reserve no channels".
+    let mask = opt_int(&a, 2, -1);
     let st = i.host();
     let mem = &st.memory;
     st.audio.play_music(mem, pat, fade, mask);

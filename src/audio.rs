@@ -233,11 +233,10 @@ impl Audio {
 
         self.channels[ch] = Channel {
             sfx_id: sfx_id as i8,
-            note_index: if (0..32).contains(&offset) {
-                offset as u8
-            } else {
-                0
-            },
+            // Confirmed against official PICO-8: an out-of-range offset
+            // clamps to the valid note range (sfx(5,0,99) starts at note
+            // 31, the max), it doesn't fall back to note 0.
+            note_index: offset.clamp(0, 31) as u8,
             sub_tick: 0.0,
             phase: 0.0,
             finished: false,
@@ -266,7 +265,12 @@ impl Audio {
         self.music_state = MusicState {
             pattern: pattern as i16,
             tick: 0,
-            channel_mask: if mask > 0 { mask as u8 } else { 0xF },
+            // mask < 0 means the argument was omitted (all 4 channels
+            // reserved, the standard default) -- an EXPLICIT mask of 0
+            // must mean "reserve no channels" and stay 0, not collapse
+            // to the same default. Confirmed against official PICO-8:
+            // music(0,0,0) leaves sfx() free to use every channel.
+            channel_mask: if mask < 0 { 0xF } else { mask as u8 },
             playing: true,
             total_patterns: 0,
             ..MusicState::new()
