@@ -989,30 +989,33 @@ fn extract_lhs(out: &[u8]) -> LhsResult<'_> {
                     depth -= 1;
                 }
             }
-        } else if ch == b'}' {
-            let mut depth: i32 = 1;
-            start -= 1;
-            while start > 0 && depth > 0 {
-                start -= 1;
-                if out[start] == b'}' {
-                    depth += 1;
-                }
-                if out[start] == b'{' {
-                    depth -= 1;
-                }
-            }
         } else if ch == b'"' || ch == b'\'' {
             // Lua's string-call sugar: `f"str"` / `f'str'` (no parens). Scan
             // back to the matching opening quote so the callee name (e.g.
-            // `rnd` in `rnd"32"\1`) is still reachable on the next iteration.
+            // `rnd` in `rnd"32"\1`) is still reachable on the next iteration
+            // -- but ONLY if this is genuinely call sugar, i.e. an
+            // identifier immediately precedes the opening quote. Otherwise
+            // the string is just the tail of a completed PRIOR statement's
+            // literal value coincidentally ending right where this scan
+            // started (`local n="..str.."b..=x`: walking back through
+            // `"..str.."`'s closing quote would otherwise splice the
+            // finished `n="..str.."` assignment into the current LHS,
+            // confirmed on a real corpus cart: blood_of_vladula-0.p8.png),
+            // and must not be consumed at all.
             let quote = ch;
-            start -= 1;
-            while start > 0 {
-                start -= 1;
-                if out[start] == quote && (start == 0 || out[start - 1] != b'\\') {
+            let mut new_start = start - 1;
+            while new_start > 0 {
+                new_start -= 1;
+                if out[new_start] == quote && (new_start == 0 || out[new_start - 1] != b'\\') {
                     break;
                 }
             }
+            let preceded_by_identifier = new_start > 0
+                && (out[new_start - 1].is_ascii_alphanumeric() || out[new_start - 1] == b'_');
+            if !preceded_by_identifier {
+                break;
+            }
+            start = new_start;
         } else if ch == b'-' && !is_prev_value(out, start - 1) {
             // Leading unary minus (e.g. `-a\b`), distinguished from binary
             // subtraction (`a-b\c`, where the `\`'s lhs is just `b`) by
