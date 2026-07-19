@@ -1,0 +1,46 @@
+name: Rust CI
+
+# Runs on every push and PR so changes are checked before merge (the pages
+# deploy workflow only runs cargo fmt/test on push to main, i.e. after
+# merge, and doesn't run clippy at all). Native-target only: no PICO-8
+# binary and no BBS cart corpus exist in this environment, so this can
+# only verify already-captured conformance goldens
+# (tests/conformance/expected_failures.txt lists the known-open gaps) --
+# it is not a substitute for the local corpus regression sweep required
+# before a PR merges to main. See CLAUDE.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: rust-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup component add rustfmt clippy
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-native-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --release --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --release --locked
