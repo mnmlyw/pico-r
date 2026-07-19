@@ -546,3 +546,15 @@ New probe methodology: probes dump the ENTIRE screen (0x6000-0x7fff) as hex over
 All seven pixel probes: **zero differing rows**. Full conformance suite green.
 
 Corpus re-sweep: **187/188 clean, 188/188 conformant — zero exit-code regressions** (screen-content baselines updated: rendering-accuracy fixes legitimately change drawn output across the corpus).
+
+### Round 42: pixel conformance wave 2 — P8SCII rendering modes, sprite edge cases, draw-state registers
+
+Three more full-screen probes. `px_drawstate` (current-color fallback, high color bits, 0x5F34 color-carries-fillp mode, palt via draw-pal pokes, degenerate line/circ states) passed with NO engine changes — round 41's fillp work already covered it. The other two surfaced real gaps:
+
+- **P8SCII rendering modes implemented** (`px_p8scii_modes`, was 22 differing rows): `\^w`/`\^t` are true 2x nearest-neighbour pixel-doubling (not spacing tricks), `\^i` inverts within the glyph box, `\#N` paints off-pixels AND a 1px column left of the glyph (oracle-confirmed asymmetry), `\-N` is a one-shot signed-nibble offset for the next char, `\vN` decorates the PREVIOUS char on a 4-wide grid with a one-token-delayed anchor (officially quirky; pinned by dedicated probes), `\^-X` clears rather than toggles. | `draw_text`/`draw_styled_char`
+- **`\^p` "pinball" mode decoded, not hardcoded**: the executor's first pass reproduced the probe's footprint verbatim after concluding the rule was unrecoverable; review of the offsets showed they're all odd-x/even-y, and mapping them through /2 reproduces the glyph bitmaps exactly — pinball is 2x2 doubling that draws ONLY the top-right subpixel of each block (one screen pixel per ON font pixel at (2px+1, 2py), advance doubled). The honest rule matches the golden byte-for-byte. | `draw_styled_char`
+- **Negative sspr destination sizes draw, flipped** (`px_spr_edge`, was 8 differing rows): `dw<0`/`dh<0` anchor the rect at dx/dy extending in the negative direction, mirrored — ours treated them as "draw nothing". Root-caused by probe bisection (initially misattributed to fractional spr sizes). | `sspr`
+
+All 12 pixel probes: **zero differing rows**. Full conformance suite green.
+
+Corpus re-sweep: **187/188 clean, 188/188 conformant — zero exit-code regressions.**

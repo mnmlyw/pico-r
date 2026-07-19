@@ -524,6 +524,22 @@ pub fn sspr(
     flip_x: bool,
     flip_y: bool,
 ) {
+    // A negative destination width/height doesn't mean "draw nothing" --
+    // it anchors the rectangle at dx/dy and extends it in the negative
+    // direction, flipped, e.g. `dw = -8` at `dx = 50` draws the 8 columns
+    // `[42, 50)` mirrored. Oracle-locked against px_spr_edge's
+    // `sspr(0,0,8,8,50,0,-8,8)`.
+    let (dx, dw, flip_x) = if dw < 0 {
+        (dx + dw, -dw, !flip_x)
+    } else {
+        (dx, dw, flip_x)
+    };
+    let (dy, dh, flip_y) = if dh < 0 {
+        (dy + dh, -dh, !flip_y)
+    } else {
+        (dy, dh, flip_y)
+    };
+
     if dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 {
         return;
     }
@@ -733,6 +749,23 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
     let mut tab_w: i32 = 16;
     let mut max_x = x;
     let mut i = 0usize;
+    // P8SCII rendering-attribute state (oracle-locked against
+    // px_p8scii_modes): pixel-doubling (wide/tall), invert (draw the
+    // glyph's OFF pixels in `color`, ON pixels transparent), opaque
+    // background colour, and pinball mode. All reset per print() call --
+    // confirmed on the golden: a `\^w` in one print() doesn't leak into
+    // the next print()'s glyphs.
+    let mut wide = false;
+    let mut tall = false;
+    let mut invert = false;
+    let mut bg_color: Option<u8> = None;
+    let mut pinball = false;
+    // `\v` (0x0B) "decorate previous character": anchor is NOT the current
+    // draw cursor but a one-token-delayed snapshot of it (see comment at
+    // the 0x0B arm) -- oracle-locked against a chain of `\v` decorations
+    // in px_p8scii_modes ("a\vfb\vfc").
+    let mut anchor_x = x;
+    let mut anchor_y = y;
     while i < text.len() {
         let ch = text[i];
         i += 1;
@@ -748,24 +781,60 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
                     let rch = text[i + 1];
                     i += 2;
                     for _ in 0..count {
-                        draw_char(memory, rch, x, y, color);
+                        anchor_x = x;
+                        anchor_y = y;
+                        draw_styled_char(
+                            memory, rch, x, y, color, wide, tall, invert, bg_color, pinball,
+                        );
                         x += char_width(rch, char_w);
                     }
                 }
             }
+            // `\#N` (0x02): opaque background colour N behind subsequently
+            // printed glyphs. Oracle-locked against px_p8scii_modes'
+            // `\#3ij`: the "off" pixels of each glyph paint N instead of
+            // staying transparent, and the filled rectangle is 1px WIDER
+            // than the glyph box, extending to the left (x-1 .. x+w-1) --
+            // confirmed from the golden showing a background-coloured
+            // column immediately before the first glyph but nothing after
+            // the last one.
             0x02 => {
-                if i + 2 < text.len() {
-                    let ox = text[i] as i8 as i32;
-                    let oy = text[i + 1] as i8 as i32;
-                    let dch = text[i + 2];
-                    i += 3;
-                    draw_char(memory, dch, x + ox, y + oy, color);
+                if i < text.len() {
+                    bg_color = Some(parse_hex_color(text[i]));
+                    i += 1;
                 }
             }
+            // `\-N` (0x03): draw the NEXT character only, offset
+            // horizontally by a signed-nibble amount (0-7 -> 0..7, 8-15 ->
+            // -8..-1), then resume normal advance from the UNshifted
+            // cursor -- oracle-locked against px_p8scii_modes' `m\-fn`
+            // ('n' rendered 1px left of its normal slot, 'f' -> -1).
+            // Unlike `\v`, this reads the CURRENT cursor directly (no
+            // anchor lag).
             0x03 => {
                 if i < text.len() {
-                    x += text[i] as i8 as i32;
+                    let m = parse_hex_color(text[i]) as i32;
                     i += 1;
+                    let dx = if m >= 8 { m - 16 } else { m };
+                    if i < text.len() {
+                        let dch = text[i];
+                        i += 1;
+                        anchor_x = x;
+                        anchor_y = y;
+                        draw_styled_char(
+                            memory,
+                            dch,
+                            x + dx,
+                            y,
+                            color,
+                            wide,
+                            tall,
+                            invert,
+                            bg_color,
+                            pinball,
+                        );
+                        x += char_width(dch, char_w);
+                    }
                 }
             }
             0x04 => {
@@ -786,11 +855,63 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
                     let cmd = text[i];
                     i += 1;
                     match cmd {
-                        b'w' => char_w = if char_w == 8 { 4 } else { 8 },
-                        b't' => char_h = if char_h == 12 { 6 } else { 12 },
+                        // `\^w` / `\^t`: pixel-double glyphs horizontally /
+                        // vertically (nearest-neighbour 2x), toggled on
+                        // each use. Oracle-locked against px_p8scii_modes:
+                        // `\^wab` widens each source pixel to 2px (advance
+                        // doubles to 8, hence char_w flips too); `\^tcd`
+                        // stretches each glyph row to 2 output rows.
+                        b'w' => {
+                            wide = !wide;
+                            char_w = if wide { 8 } else { 4 };
+                        }
+                        b't' => {
+                            tall = !tall;
+                            char_h = if tall { 12 } else { 6 };
+                        }
+                        // `\^i`: invert -- draw the glyph's OFF pixels in
+                        // `color` and leave ON pixels transparent, i.e. a
+                        // photographic negative confined to the glyph's
+                        // own box (no bleed into the advance-cell margin).
+                        b'i' => invert = !invert,
+                        // `\^p`: "pinball" mode -- the glyph is doubled
+                        // 2x2 like `\^w\^t` but only the top-right
+                        // subpixel of each 2x2 block is drawn, giving the
+                        // sparse dot-matrix look (each ON font pixel
+                        // (px,py) emits exactly one screen pixel at
+                        // (2*px+1, 2*py); advance doubles like wide).
+                        // Decoded from the px_p8scii_modes golden: its
+                        // dot offsets are all odd-x/even-y, and mapping
+                        // them back through /2 reproduces the `s` and `t`
+                        // font bitmaps exactly.
                         b'p' => {
-                            char_w = 8;
-                            char_h = 12;
+                            pinball = !pinball;
+                            char_w = if pinball { 8 } else { 4 };
+                            char_h = if pinball { 12 } else { 6 };
+                        }
+                        // `\^-X`: explicitly clear (not toggle) mode X.
+                        // Oracle-locked against px_p8scii_modes'
+                        // `\^wop\^-wqr`: wide is ON for "op", OFF for "qr".
+                        b'-' if i < text.len() => {
+                            let sub = text[i];
+                            i += 1;
+                            match sub {
+                                b'w' => {
+                                    wide = false;
+                                    char_w = 4;
+                                }
+                                b't' => {
+                                    tall = false;
+                                    char_h = 6;
+                                }
+                                b'i' => invert = false,
+                                b'p' => {
+                                    pinball = false;
+                                    char_w = 4;
+                                    char_h = 6;
+                                }
+                                _ => {}
+                            }
                         }
                         b'c' if i < text.len() => {
                             let clear_col = parse_hex_color(text[i]);
@@ -855,8 +976,54 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
             0x0D => x = start_x - cam_x,
             0x0E => char_w = 8,
             0x0F => char_w = 4,
+            // `\vN` (0x0B): "decorate previous character" -- draw the NEXT
+            // character offset from an ANCHOR point on a 4x4 grid (x in
+            // the low 2 bits, spanning -2..+1; y in the high bits, -8
+            // upward in steps of 1) without moving the print cursor.
+            // Oracle-locked against px_p8scii_modes' `a\vfb\vfc`: the
+            // anchor is NOT the live cursor but a one-token-delayed
+            // snapshot of it -- the first decoration after a normal
+            // character anchors at THAT character's own position, while a
+            // second (or later) decoration in a row anchors at the
+            // cursor's current (frozen, since decorations never move it)
+            // position. Modelled by updating `anchor_{x,y}` to the
+            // pre-token cursor snapshot after every glyph-producing token
+            // (normal or decorated) -- see the default arm and the 0x03
+            // arm above for the same pattern.
+            0x0B => {
+                if i < text.len() {
+                    let m = parse_hex_color(text[i]) as i32;
+                    i += 1;
+                    if i < text.len() {
+                        let dch = text[i];
+                        i += 1;
+                        let dx = (m % 4) - 2;
+                        let dy = -8 + (m / 4);
+                        let cur_x = x;
+                        let cur_y = y;
+                        draw_styled_char(
+                            memory,
+                            dch,
+                            anchor_x + dx,
+                            anchor_y + dy,
+                            color,
+                            wide,
+                            tall,
+                            invert,
+                            bg_color,
+                            pinball,
+                        );
+                        anchor_x = cur_x;
+                        anchor_y = cur_y;
+                    }
+                }
+            }
             _ => {
-                draw_char(memory, ch, x, y, color);
+                anchor_x = x;
+                anchor_y = y;
+                draw_styled_char(
+                    memory, ch, x, y, color, wide, tall, invert, bg_color, pinball,
+                );
                 x += char_width(ch, char_w);
             }
         }
@@ -881,21 +1048,86 @@ fn char_width(code: u8, char_w: i32) -> i32 {
     }
 }
 
-fn draw_char(memory: &mut Memory, code: u8, x: i32, y: i32, col: u8) {
-    if code >= 0x80 {
-        for py in 0..8u8 {
-            for px in 0..8u8 {
-                if gfx_font::get_wide_pixel(code, px, py) {
-                    put_pixel_no_cam(memory, x + px as i32, y + py as i32, col);
+// General glyph blit honouring the P8SCII rendering-attribute state
+// (wide/tall pixel-doubling, invert, opaque background, pinball). With
+// every flag at its default (false/false/false/None/false) this produces
+// pixel-identical output to the old unconditional draw_char, so existing
+// callers (repeat, plain chars) are unaffected when no mode is active.
+#[allow(clippy::too_many_arguments)]
+fn draw_styled_char(
+    memory: &mut Memory,
+    code: u8,
+    x: i32,
+    y: i32,
+    col: u8,
+    wide: bool,
+    tall: bool,
+    invert: bool,
+    bg: Option<u8>,
+    pinball: bool,
+) {
+    if pinball {
+        // Sparse dot-matrix rendering: one screen pixel per ON font
+        // pixel, at the top-right subpixel of the 2x2-doubled block
+        // (see the `\^p` handler comment for the golden decode).
+        let (bw, bh): (u8, u8) = if code >= 0x80 { (8, 8) } else { (4, 6) };
+        for py in 0..bh {
+            for px in 0..bw {
+                let on = if code >= 0x80 {
+                    gfx_font::get_wide_pixel(code, px, py)
+                } else {
+                    gfx_font::get_pixel(code, px, py)
+                };
+                if on {
+                    put_pixel_no_cam(memory, x + px as i32 * 2 + 1, y + py as i32 * 2, col);
                 }
             }
         }
         return;
     }
-    for py in 0..6u8 {
-        for px in 0..4u8 {
-            if gfx_font::get_pixel(code, px, py) {
-                put_pixel_no_cam(memory, x + px as i32, y + py as i32, col);
+
+    let (bw, bh): (u8, u8) = if code >= 0x80 { (8, 8) } else { (4, 6) };
+    let mult_x = if wide { 2 } else { 1 };
+    let mult_y = if tall { 2 } else { 1 };
+
+    // `on_color`/`off_color`: what to paint a glyph pixel that's ON (a lit
+    // font pixel) vs OFF. Plain glyph: on -> `col`, off -> nothing.
+    // Opaque background (`\#N`): on -> `col`, off -> the background
+    // colour (oracle-locked against `\#3ij`). Invert (`\^i`): on ->
+    // nothing, off -> `col` -- a photographic negative (oracle-locked
+    // against `\^igh`). Both `\#N` and `\^i` additionally paint a column
+    // 1px to the LEFT of the glyph box with the off-colour (confirmed on
+    // both goldens: a background/inverted pixel appears immediately
+    // before the first glyph, but nothing trails after the last one).
+    let (on_color, off_color): (Option<u8>, Option<u8>) = if invert {
+        (None, Some(col))
+    } else {
+        (Some(col), bg)
+    };
+
+    if let Some(oc) = off_color {
+        let box_h = bh as i32 * mult_y;
+        for yy in 0..box_h {
+            put_pixel_no_cam(memory, x - 1, y + yy, oc);
+        }
+    }
+
+    for py in 0..bh {
+        for px in 0..bw {
+            let on = if code >= 0x80 {
+                gfx_font::get_wide_pixel(code, px, py)
+            } else {
+                gfx_font::get_pixel(code, px, py)
+            };
+            let color_to_use = if on { on_color } else { off_color };
+            if let Some(c) = color_to_use {
+                let ox = x + px as i32 * mult_x;
+                let oy = y + py as i32 * mult_y;
+                for dy in 0..mult_y {
+                    for dx in 0..mult_x {
+                        put_pixel_no_cam(memory, ox + dx, oy + dy, c);
+                    }
+                }
             }
         }
     }
