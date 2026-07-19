@@ -7,10 +7,7 @@ p8scii-utf8-glyph-not-decoded
 pal-secondary-palette-p2-noop
 flip-during-init-no-present
 line-continuation-flag-not-in-ram
-split-multichar-sep-literal-substring
 neg-fractional-coord-truncation
 coroutine-type-reports-table
 clip-negative-origin-clamp-order
-tostr-identity-flag-tables-functions
-chr-nonnumeric-arg-dropped
 metamethod-dispatch-missing

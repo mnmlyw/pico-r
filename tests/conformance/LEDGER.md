@@ -558,3 +558,13 @@ Three more full-screen probes. `px_drawstate` (current-color fallback, high colo
 All 12 pixel probes: **zero differing rows**. Full conformance suite green.
 
 Corpus re-sweep: **187/188 clean, 188/188 conformant — zero exit-code regressions.**
+
+### Round 43: three gaps from the p8-gap-reduce backlog
+
+Drained the three quickest of the 12 gaps confirmed in round "restore green conformance suite" (`expected_failures.txt`), each a real bug found by an automated discover pass and independently root-caused:
+
+- **`split(str, sep)` with a multi-char `sep` only uses `sep`'s FIRST byte as the delimiter**, discarding the rest — not "treat sep as a set of chars" and not "literal multi-char substring search" (both ruled out by the golden: `split("a-b_c","-_")` splits on `-` only; `split("a-b_c","_-")` splits on `_` only, matching each string's first character). Ours previously searched for the whole `sep` slice as a literal substring. | `api_split`
+- **`chr()` coerces non-numeric arguments to 0 rather than dropping them** — `chr(false,65)` is the 2-byte string `[0,65]`, not 1-byte `[65]`; `chr("abc")` is `[0]`, not empty; `nil` args coerce too (`chr(65,nil,66)` is `[65,0,66]`). Ours used `if let Some(n) = v.as_number()` which silently skipped the push for non-numbers. | `api_chr`
+- **`tostr(x, 0x1)`'s identity flag on tables/functions** should switch to `"table: 0xADDR"` / `"function: 0xADDR"` (the same format plain `tostring()` already produces) instead of the default bracket form — the flag branch only handled `Value::Number`, silently falling through to `display_string`'s `"[table]"`/`"[function]"` regardless of the flag. | `api_tostr`
+
+Removed `split-multichar-sep-literal-substring`, `chr-nonnumeric-arg-dropped`, `tostr-identity-flag-tables-functions` from `expected_failures.txt`. Full conformance suite green.

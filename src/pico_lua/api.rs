@@ -795,6 +795,25 @@ fn api_tostr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = a[0].clone();
     let flags = arg_int(&a, 1).unwrap_or(0);
     if flags != 0 {
+        // On a table/function, the 0x1 (identity) flag switches from the
+        // "[table]"/"[function]" display form to "table: 0xADDR" /
+        // "function: 0xADDR" -- the same format plain tostring() uses --
+        // oracle-confirmed via probe tostr-identity-flag-tables-functions.
+        if flags & 0x1 != 0 {
+            match &v {
+                Value::Table(t) => {
+                    return Ok(vec![str_v(
+                        format!("table: 0x{:x}", Rc::as_ptr(t) as usize).as_bytes(),
+                    )]);
+                }
+                Value::Function(f) => {
+                    return Ok(vec![str_v(
+                        format!("function: 0x{:x}", f.identity()).as_bytes(),
+                    )]);
+                }
+                _ => {}
+            }
+        }
         // Format flags only apply to numbers; confirmed against official
         // PICO-8: 0x1 = hex "0xHHHH.LLLL", 0x2 = raw 32-bit fixed value as a
         // plain decimal integer, 0x3 = hex digits with no "." separator.
@@ -906,13 +925,15 @@ fn api_sub(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_chr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let mut out = Vec::with_capacity(a.len());
     for v in &a {
-        if let Some(n) = v.as_number() {
-            // Confirmed against official PICO-8: out-of-range ordinals wrap
-            // via `% 256` rather than being dropped (chr(256,300,-1) -> the
-            // 3-byte string [0, 44, 255]).
-            let n = (n as i32).rem_euclid(256);
-            out.push(n as u8);
-        }
+        // A non-numeric argument (bool, string, nil) coerces to 0 rather
+        // than being dropped from the output -- oracle-confirmed:
+        // chr(false,65) is the 2-byte string [0,65], not 1-byte [65].
+        let n = v.as_number().unwrap_or(0.0);
+        // Confirmed against official PICO-8: out-of-range ordinals wrap
+        // via `% 256` rather than being dropped (chr(256,300,-1) -> the
+        // 3-byte string [0, 44, 255]).
+        let n = (n as i32).rem_euclid(256);
+        out.push(n as u8);
     }
     Ok(vec![Value::Str(Rc::from(out.as_slice()))])
 }
@@ -1033,11 +1054,19 @@ fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         }
         return Ok(vec![Value::Table(t)]);
     }
+    // A separator longer than one character only uses its FIRST byte as
+    // the delimiter -- the rest is silently ignored. Oracle-confirmed:
+    // split("a-b_c","-_") == {"a","b_c"} (splits on '-' only) and
+    // split("a-b_c","_-") == {"a-b","c"} (splits on '_' only) -- neither
+    // "treat sep as a set of chars" (would split on both, 3 parts) nor
+    // "treat sep as a literal multi-char substring" (would find no match
+    // at all, since '-' and '_' are never adjacent, and return 1 part).
+    let sep_byte = sep[0];
     let mut idx: i64 = 1;
     let mut start = 0usize;
     let mut i = 0usize;
-    while i + sep.len() <= s.len() {
-        if s[i..i + sep.len()] == sep[..] {
+    while i < s.len() {
+        if s[i] == sep_byte {
             let part = &s[start..i];
             let v = if convert {
                 match split_token_to_number(part) {
@@ -1049,7 +1078,7 @@ fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
             };
             t.borrow_mut().set(num(idx as f64), v);
             idx += 1;
-            i += sep.len();
+            i += 1;
             start = i;
         } else {
             i += 1;
