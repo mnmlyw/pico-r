@@ -793,13 +793,27 @@ impl Interp {
                             x / y
                         }
                     }
-                    // Confirmed against official PICO-8: x % 0 == 0 always
-                    // (not derived from the saturated division above).
+                    // NOT floor-mod on the real (or fixed-quantized) float
+                    // values -- confirmed via z8lua's fix32::operator% (the
+                    // reference this engine's trig tables were also sourced
+                    // from): the divisor's raw 16.16 bit pattern is made
+                    // ABSOLUTE first (so the result is always non-negative,
+                    // regardless of the original divisor's sign -- "PICO-8
+                    // always returns positive values" per its comment), then
+                    // it's a raw C-style truncating i32 remainder on the bit
+                    // patterns, nudged up by the (now-positive) divisor bits
+                    // if that remainder came out negative. Oracle-confirmed:
+                    // (-13035) % (-7937) == 2839, which no floor-mod or
+                    // trunc-mod formula on the plain float values reproduces
+                    // (they all give -5098) -- only this raw-bits-with-abs
+                    // -divisor recipe matches.
                     Mod => {
-                        if y == 0.0 {
+                        let bx = to_fixed(y).wrapping_abs();
+                        if bx == 0 {
                             0.0
                         } else {
-                            x - y * (x / y).floor()
+                            let r = to_fixed(x).wrapping_rem(bx);
+                            from_fixed(if r < 0 { r.wrapping_add(bx) } else { r })
                         }
                     }
                     Pow => x.powf(y),

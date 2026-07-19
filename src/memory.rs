@@ -30,6 +30,10 @@ pub const ADDR_DEVKIT: u16 = 0x5F2D;
 pub const ADDR_FILL_PAT: u16 = 0x5F31;
 pub const ADDR_LINE_X: u16 = 0x5F3C; // last line() endpoint, 16-bit
 pub const ADDR_LINE_Y: u16 = 0x5F3E;
+// One-shot "suppress the next 2-arg line()'s continuation segment" flag --
+// oracle-confirmed self-clearing: reading it back after a poke(0x5F35,1)
+// + line(x,y,col) shows 0, not 1 (the 2-arg form consumes and clears it).
+pub const ADDR_LINE_SUPPRESS: u16 = 0x5F35;
 
 pub const ADDR_INPUT_P0: u16 = 0x5F4C;
 pub const ADDR_INPUT_P1: u16 = 0x5F4D;

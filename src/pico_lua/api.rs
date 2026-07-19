@@ -282,15 +282,25 @@ pub fn register_all(globals: &Rc<Table>) {
 
 // === stdlib bodies ===
 
-fn lua_type(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
+fn lua_type(i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
     if args.is_empty() {
         return Ok(vec![]);
+    }
+    if is_coroutine(i, &args[0]) {
+        return Ok(vec![str_v(b"thread")]);
     }
     Ok(vec![str_v(args[0].type_name().as_bytes())])
 }
 
-fn lua_tostring(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
+fn lua_tostring(i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let v = args.into_iter().next().unwrap_or(Value::Nil);
+    if let Value::Table(t) = &v {
+        if is_coroutine(i, &v) {
+            return Ok(vec![str_v(
+                format!("thread: 0x{:x}", Rc::as_ptr(t) as usize).as_bytes(),
+            )]);
+        }
+    }
     let s = match &v {
         Value::Nil => "nil".to_string(),
         Value::Bool(b) => {
@@ -769,7 +779,10 @@ fn api_rotr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 
 // === String ===
 
-fn display_string(v: &Value) -> String {
+fn display_string(i: &Interp, v: &Value) -> String {
+    if is_coroutine(i, v) {
+        return "[thread]".to_string();
+    }
     match v {
         Value::Nil => "[nil]".to_string(),
         Value::Bool(b) => {
@@ -786,7 +799,7 @@ fn display_string(v: &Value) -> String {
     }
 }
 
-fn api_tostr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+fn api_tostr(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     // tostr() with truly no arguments is "" -- distinct from tostr(nil),
     // which is "[nil]" (confirmed against official PICO-8).
     if a.is_empty() {
@@ -799,7 +812,10 @@ fn api_tostr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         // "[table]"/"[function]" display form to "table: 0xADDR" /
         // "function: 0xADDR" -- the same format plain tostring() uses --
         // oracle-confirmed via probe tostr-identity-flag-tables-functions.
-        if flags & 0x1 != 0 {
+        // A coroutine (itself represented as a Table) is the one exception:
+        // the flag has NO effect there -- tostr(co,1) == tostr(co) ==
+        // "[thread]" always, oracle-confirmed.
+        if flags & 0x1 != 0 && !is_coroutine(i, &v) {
             match &v {
                 Value::Table(t) => {
                     return Ok(vec![str_v(
@@ -835,7 +851,7 @@ fn api_tostr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     if let Value::Str(b) = &v {
         return Ok(vec![Value::Str(Rc::clone(b))]);
     }
-    Ok(vec![str_v(display_string(&v).as_bytes())])
+    Ok(vec![str_v(display_string(i, &v).as_bytes())])
 }
 
 fn api_tonum(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -1368,7 +1384,12 @@ fn api_line(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         let x1 = arg_int(&a, 0).unwrap_or(0);
         let y1 = arg_int(&a, 1).unwrap_or(0);
         let col = get_color(st, &a, 2);
-        if st.line_valid {
+        // A poke(0x5F35,1) suppresses just this one continuation segment;
+        // the register self-clears once consumed (oracle-confirmed:
+        // peek(0x5F35) reads back 0 afterward, not the poked 1).
+        let suppress = st.memory.ram[mem::ADDR_LINE_SUPPRESS as usize] != 0;
+        st.memory.ram[mem::ADDR_LINE_SUPPRESS as usize] = 0;
+        if st.line_valid && !suppress {
             gfx::draw_line(&mut st.memory, st.line_x, st.line_y, x1, y1, col);
         }
         st.line_x = x1;
@@ -1686,11 +1707,20 @@ fn api_pal(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     if let Some(Value::Table(t)) = a.first() {
         let p = opt_int(&a, 1, 0);
         if p == 2 {
-            // Secondary/pen palette (used by fillp's alternate color) --
-            // confirmed against official PICO-8 that this must NOT touch
-            // the draw palette at 0x5f00. Its own storage/effect isn't
-            // implemented yet; a safe no-op is still more correct than
-            // corrupting the draw palette.
+            // Secondary/"p2" palette: confirmed via oracle to have NO
+            // effect on drawing whatsoever (a fillp'd draw looks identical
+            // with or without a p2 remap active) -- it's pure storage, at
+            // 0x5f60+color, holding the RAW byte given (not masked to 4
+            // bits like the real draw palette: pal(12,0x87,2) reads back
+            // as 135, not 7).
+            for (key, v) in t.borrow().map.iter() {
+                let Key::Int(key) = key else { continue };
+                let k = key.rem_euclid(16) as usize;
+                if !matches!(v, Value::Nil) {
+                    let val = v.as_number().unwrap_or(0.0) as i32 as u8;
+                    st.memory.ram[0x5f60 + k] = val;
+                }
+            }
             return Ok(vec![]);
         }
         // Confirmed against official PICO-8: out-of-range table keys wrap
@@ -1714,7 +1744,8 @@ fn api_pal(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let c1 = arg_int(&a, 1).unwrap_or(0) as u8 & 0xF;
     let p = opt_int(&a, 2, 0);
     if p == 2 {
-        // See the table-form comment above: p=2 must not touch 0x5f00.
+        // See the table-form comment above.
+        st.memory.ram[0x5f60 + c0 as usize] = arg_int(&a, 1).unwrap_or(0) as u8;
         return Ok(vec![]);
     }
     if p == 1 {
@@ -2111,7 +2142,7 @@ fn api_printh(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let v = a.first().cloned().unwrap_or(Value::Nil);
-        println!("{}", display_string(&v));
+        println!("{}", display_string(_i, &v));
     }
     Ok(vec![])
 }
@@ -2152,6 +2183,19 @@ fn co_lookup(
         return i.coroutines.get(&(Rc::as_ptr(t) as usize)).cloned();
     }
     None
+}
+
+// A coroutine handle is represented as a Table registered in
+// `i.coroutines` (keyed by its Rc pointer) rather than a dedicated Value
+// variant -- but real Lua/PICO-8's type()/tostring() report it as
+// "thread", not "table" (oracle-confirmed). Anywhere a table's reported
+// type matters, check this first.
+fn is_coroutine(i: &Interp, v: &Value) -> bool {
+    if let Value::Table(t) = v {
+        i.coroutines.contains_key(&(Rc::as_ptr(t) as usize))
+    } else {
+        false
+    }
 }
 
 fn api_cocreate(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {

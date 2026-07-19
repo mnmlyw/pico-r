@@ -4,10 +4,7 @@
 # on. Remove a line once its engine fix lands and the probe matches.
 fillp-sprite-apply-gate-missing
 p8scii-utf8-glyph-not-decoded
-pal-secondary-palette-p2-noop
 flip-during-init-no-present
-line-continuation-flag-not-in-ram
 neg-fractional-coord-truncation
-coroutine-type-reports-table
 clip-negative-origin-clamp-order
 metamethod-dispatch-missing
