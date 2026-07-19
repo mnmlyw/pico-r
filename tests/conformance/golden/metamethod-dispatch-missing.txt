@@ -1,0 +1,10 @@
+RESULT nidx x=5
+RESULT nidx_raw 5
+RESULT eq true
+RESULT lt true
+RESULT len 99
+RESULT ts V(1)
+RESULT plain_eq false
+RESULT plain_eq_self true
+RESULT plain_len 0
+DONE

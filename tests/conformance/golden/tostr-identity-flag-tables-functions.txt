@@ -1,0 +1,12 @@
+RESULT t_prefix table:
+RESULT t_space  
+RESULT t_0x 0x
+RESULT t_len_ge true
+RESULT f_prefix function:
+RESULT f_space  
+RESULT f_0x 0x
+RESULT f_len_ge true
+RESULT t_default [table]
+RESULT f_default [function]
+RESULT n_flag1 0x0001.8000
+DONE

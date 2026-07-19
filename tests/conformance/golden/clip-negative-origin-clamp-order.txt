@@ -1,0 +1,4 @@
+RESULT screen_hash_both_neg 6936
+RESULT screen_hash_x_neg 5306
+RESULT screen_hash_y_neg 676
+DONE

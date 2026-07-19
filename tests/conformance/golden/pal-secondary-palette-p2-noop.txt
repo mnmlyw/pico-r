@@ -1,0 +1,8 @@
+RESULT screen_hash_with_p2 7754
+RESULT screen_hash_without_p2 7754
+RESULT screen_hash_p2_no_pattern 4037
+RESULT screen_hash_p2_table 5514
+RESULT screen_hash_after_reset 5514
+RESULT peek_0x5f60_plus_12 135
+RESULT peek_0x5f70_plus_12 0
+DONE

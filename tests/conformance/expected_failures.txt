@@ -1,0 +1,16 @@
+# Probes for known, oracle-confirmed gaps not yet fixed. One stem per line.
+# Discovered by an automated corpus/spec-audit sweep; each probe+golden pair
+# is real evidence of a divergence from official PICO-8, just not yet acted
+# on. Remove a line once its engine fix lands and the probe matches.
+fillp-sprite-apply-gate-missing
+p8scii-utf8-glyph-not-decoded
+pal-secondary-palette-p2-noop
+flip-during-init-no-present
+line-continuation-flag-not-in-ram
+split-multichar-sep-literal-substring
+neg-fractional-coord-truncation
+coroutine-type-reports-table
+clip-negative-origin-clamp-order
+tostr-identity-flag-tables-functions
+chr-nonnumeric-arg-dropped
+metamethod-dispatch-missing

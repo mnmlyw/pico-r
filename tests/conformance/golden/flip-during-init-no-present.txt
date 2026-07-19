@@ -1,0 +1,5 @@
+RESULT screen_checksum 13359
+RESULT t 0.1333
+RESULT time 0.1333
+RESULT t2 0.2
+DONE

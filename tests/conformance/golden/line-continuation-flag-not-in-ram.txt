@@ -1,0 +1,5 @@
+RESULT hash_after_continue 909
+RESULT hash_after_poke_invalidate 5891
+RESULT peek_5f35 0
+RESULT hash_after_explicit_reset 1864
+DONE
