@@ -1051,6 +1051,14 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
                 }
             }
             0x00 => break,
+            // `\a` (0x07): audio-cue annotation -- everything from here to
+            // the end of the STRING is the audio encoding, not visible
+            // text (oracle-confirmed: print("\ac1x") advances the cursor
+            // by zero; print("ab\acc") only "ab" contributes to the
+            // return value/cursor advance, "cc" is swallowed). Not just
+            // "this call" like 0x00 -- there's no further dispatch after
+            // it either way since it consumes the rest of `text`.
+            0x07 => break,
             0x08 => x -= char_w,
             0x09 => x = (x / tab_w) * tab_w + tab_w,
             0x0A => {

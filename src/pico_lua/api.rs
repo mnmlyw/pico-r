@@ -1376,10 +1376,16 @@ fn api_pset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_pget(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let x = arg_int(&a, 0).unwrap_or(0);
     let y = arg_int(&a, 1).unwrap_or(0);
-    if !(0..128).contains(&x) || !(0..128).contains(&y) {
+    let st = i.host();
+    // pget() reads back in the same coordinate space pset()/put_pixel()
+    // write in -- it must subtract the active camera() offset too, or a
+    // pset/pget round-trip under a non-zero camera silently breaks.
+    let (cam_x, cam_y) = gfx::get_camera(&st.memory);
+    let (sx, sy) = (x - cam_x, y - cam_y);
+    if !(0..128).contains(&sx) || !(0..128).contains(&sy) {
         return Ok(vec![num(0.0)]);
     }
-    let c = i.host().memory.screen_get(x as u8, y as u8);
+    let c = st.memory.screen_get(sx as u8, sy as u8);
     Ok(vec![num(c as f64)])
 }
 fn api_line(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -1912,7 +1918,14 @@ fn api_btnp(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 
 fn api_peek(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let addr = arg_addr(&a, 0);
-    let n = opt_int(&a, 1, 1).max(1) as usize;
+    let n = opt_int(&a, 1, 1);
+    // A non-positive count returns zero values -- oracle-confirmed
+    // (peek(0,0) and peek(0,-3) both give no results), not clamped up to
+    // a single byte the way it was.
+    if n <= 0 {
+        return Ok(vec![]);
+    }
+    let n = n as usize;
     if n == 1 {
         return Ok(vec![num(i.host().memory.peek(addr) as f64)]);
     }
@@ -2134,18 +2147,23 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         } else {
             0.0
         }),
+        // 46-49 = sfx id per channel, 50-53 = note index per channel --
+        // oracle-confirmed (was swapped): sfx(3,0) then stat(46)==3 (the
+        // sfx id), stat(50)==0 (the note index); an inactive channel
+        // reports -1 for BOTH (not 0 for note index -- "not playing"
+        // is a uniform -1 sentinel across both stat ranges).
         46..=49 => {
             let c = &st.audio.channels[(n - 46) as usize];
             if !c.finished && c.sfx_id >= 0 {
-                num(c.note_index as f64)
+                num(c.sfx_id as f64)
             } else {
-                num(0.0)
+                num(-1.0)
             }
         }
         50..=53 => {
             let c = &st.audio.channels[(n - 50) as usize];
             if !c.finished && c.sfx_id >= 0 {
-                num(c.sfx_id as f64)
+                num(c.note_index as f64)
             } else {
                 num(-1.0)
             }

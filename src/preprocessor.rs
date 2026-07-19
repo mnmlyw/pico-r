@@ -690,13 +690,15 @@ fn is_valid_lua52_escape(ch: u8) -> bool {
 }
 
 fn p8scii_button_id(ch: u8) -> Option<&'static [u8]> {
+    // Oracle-confirmed (0x8E/0x97 were swapped): 0x8E (o-button glyph) is
+    // button 4, 0x97 (x-button glyph) is button 5.
     Some(match ch {
         0x83 => b"3",
         0x8B => b"0",
-        0x8E => b"5",
+        0x8E => b"4",
         0x91 => b"1",
         0x94 => b"2",
-        0x97 => b"4",
+        0x97 => b"5",
         _ => return None,
     })
 }
