@@ -1,0 +1,4 @@
+RESULT sspr_flipx_scale_8to13x8to5_hash 2434
+RESULT sspr_flipy_scale_8to5x8to13_hash 695
+RESULT sspr_flipxy_scale_11to17x7to9_hash 6616
+DONE

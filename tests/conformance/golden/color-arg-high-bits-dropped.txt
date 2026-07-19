@@ -1,0 +1,8 @@
+RESULT circfill_invert_gate_on 2669
+RESULT circfill_plain_gate_on 2208
+RESULT circfill_invert_gate_off 2208
+RESULT rectfill_invert_gate_on 2877
+RESULT rectfill_plain_gate_on 4279
+RESULT ovalfill_invert_gate_on 1271
+RESULT ovalfill_plain_gate_on 1821
+DONE

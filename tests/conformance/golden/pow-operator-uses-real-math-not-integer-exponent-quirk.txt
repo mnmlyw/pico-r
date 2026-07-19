@@ -1,0 +1,7 @@
+RESULT pow_frac 7.2236
+RESULT pow_half 4
+RESULT pow_neg 0.1111
+RESULT pow_int_control 81
+RESULT pow_zero 1
+RESULT pow_neg_frac 0.7071
+DONE

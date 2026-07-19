@@ -1,0 +1,7 @@
+RESULT down 3
+RESULT left 0
+RESULT o 4
+RESULT right 1
+RESULT up 2
+RESULT x 5
+DONE

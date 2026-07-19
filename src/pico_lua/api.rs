@@ -36,7 +36,12 @@ fn arg_num(args: &[Value], i: usize) -> Option<f64> {
     args.get(i).and_then(|v| v.as_number())
 }
 fn arg_int(args: &[Value], i: usize) -> Option<i32> {
-    arg_num(args, i).map(safe_to_i32)
+    // PICO-8 truncates numeric arguments via flr() (floor toward -infinity),
+    // not toward-zero truncation: e.g. sub(s,-1.5) behaves like sub(s,-2),
+    // not sub(s,-1). Applies across the general-purpose int argument path
+    // (sub, chr, mget/mset, fget/fset, spr/sspr coords, memset value, etc.),
+    // matching arg_addr's existing floor semantics for peek/poke addresses.
+    arg_num(args, i).map(|f| safe_to_i32(f.floor()))
 }
 fn opt_int(args: &[Value], i: usize, d: i32) -> i32 {
     if i >= args.len() || matches!(args[i], Value::Nil) {
@@ -80,9 +85,8 @@ fn safe_to_i32(f: f64) -> i32 {
 // truncate-toward-zero: confirmed against official PICO-8 that
 // peek(-0.5) reads the same byte as peek(-1) (both wrap to 0xffff), not
 // address 0 (which is what `as i32` truncation would give for -0.5).
-// Scoped to address arguments specifically -- not applied to arg_int
-// generally, since that's used pervasively for unrelated arguments this
-// hasn't been verified for.
+// (arg_int also floors now, for the same reason -- kept as a separate
+// helper here since this one returns u16 with different default handling.)
 fn arg_addr(args: &[Value], i: usize) -> u16 {
     let f = arg_num(args, i).unwrap_or(0.0);
     if f.is_nan() {
@@ -191,6 +195,8 @@ pub fn register_all(globals: &Rc<Table>) {
     set("circfill", api_circfill);
     set("oval", api_oval);
     set("ovalfill", api_ovalfill);
+    set("rrect", api_rrect);
+    set("rrectfill", api_rrectfill);
     set("spr", api_spr);
     set("sspr", api_sspr);
     set("map", api_map);
@@ -628,18 +634,18 @@ fn api_atan2(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![num(from_fixed(bits))])
 }
 fn api_max(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let mut r = arg_num(&a, 0).unwrap_or(0.0);
-    for v in a.iter().skip(1) {
-        r = r.max(v.as_number().unwrap_or(0.0));
-    }
-    Ok(vec![num(r)])
+    // Official PICO-8 max() is strictly binary: a missing 2nd arg defaults
+    // to 0, and any 3rd+ arg is ignored entirely.
+    let x = arg_num(&a, 0).unwrap_or(0.0);
+    let y = arg_num(&a, 1).unwrap_or(0.0);
+    Ok(vec![num(x.max(y))])
 }
 fn api_min(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let mut r = arg_num(&a, 0).unwrap_or(0.0);
-    for v in a.iter().skip(1) {
-        r = r.min(v.as_number().unwrap_or(0.0));
-    }
-    Ok(vec![num(r)])
+    // Official PICO-8 min() is strictly binary: a missing 2nd arg defaults
+    // to 0, and any 3rd+ arg is ignored entirely.
+    let x = arg_num(&a, 0).unwrap_or(0.0);
+    let y = arg_num(&a, 1).unwrap_or(0.0);
+    Ok(vec![num(x.min(y))])
 }
 fn api_mid(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let x = arg_num(&a, 0).unwrap_or(0.0);
@@ -948,7 +954,9 @@ fn api_chr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         // Confirmed against official PICO-8: out-of-range ordinals wrap
         // via `% 256` rather than being dropped (chr(256,300,-1) -> the
         // 3-byte string [0, 44, 255]).
-        let n = (n as i32).rem_euclid(256);
+        // Fractional args floor (not truncate) first, same as arg_int:
+        // chr(-0.5) -> 255, not chr(0) -> 0.
+        let n = safe_to_i32(n.floor()).rem_euclid(256);
         out.push(n as u8);
     }
     Ok(vec![Value::Str(Rc::from(out.as_slice()))])
@@ -1482,6 +1490,34 @@ fn api_ovalfill(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     );
     Ok(vec![])
 }
+fn api_rrect(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    let r = arg_int(&a, 4).unwrap_or(0);
+    let col = get_color(i.host(), &a, 5);
+    gfx::rrect(
+        &mut i.host().memory,
+        arg_int(&a, 0).unwrap_or(0),
+        arg_int(&a, 1).unwrap_or(0),
+        arg_int(&a, 2).unwrap_or(0),
+        arg_int(&a, 3).unwrap_or(0),
+        r,
+        col,
+    );
+    Ok(vec![])
+}
+fn api_rrectfill(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    let r = arg_int(&a, 4).unwrap_or(0);
+    let col = get_color(i.host(), &a, 5);
+    gfx::rrectfill(
+        &mut i.host().memory,
+        arg_int(&a, 0).unwrap_or(0),
+        arg_int(&a, 1).unwrap_or(0),
+        arg_int(&a, 2).unwrap_or(0),
+        arg_int(&a, 3).unwrap_or(0),
+        r,
+        col,
+    );
+    Ok(vec![])
+}
 fn api_spr(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let n = arg_int(&a, 0).unwrap_or(0);
     let x = arg_int(&a, 1).unwrap_or(0);
@@ -1669,10 +1705,12 @@ fn api_clip(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         st.memory.ram[mem::ADDR_CLIP_RIGHT as usize] = 128;
         st.memory.ram[mem::ADDR_CLIP_BOTTOM as usize] = 128;
     } else {
-        let mut x = arg_int(&a, 0).unwrap_or(0).max(0);
-        let mut y = arg_int(&a, 1).unwrap_or(0).max(0);
-        let mut x1 = (x + arg_int(&a, 2).unwrap_or(0)).min(128);
-        let mut y1 = (y + arg_int(&a, 3).unwrap_or(0)).min(128);
+        let raw_x = arg_int(&a, 0).unwrap_or(0);
+        let raw_y = arg_int(&a, 1).unwrap_or(0);
+        let mut x1 = (raw_x + arg_int(&a, 2).unwrap_or(0)).min(128);
+        let mut y1 = (raw_y + arg_int(&a, 3).unwrap_or(0)).min(128);
+        let mut x = raw_x.max(0);
+        let mut y = raw_y.max(0);
         let clip_prev = opt_bool(&a, 4, false);
         if clip_prev {
             x = x.max(st.memory.ram[mem::ADDR_CLIP_LEFT as usize] as i32);
@@ -1700,8 +1738,6 @@ fn api_pal(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
             st.memory.ram[mem::ADDR_SCREEN_PAL as usize + k] = k as u8;
         }
         st.memory.ram[mem::ADDR_DRAW_PAL as usize] |= 0x10;
-        st.memory.poke16(mem::ADDR_FILL_PAT, 0);
-        st.memory.ram[mem::ADDR_FILL_PAT as usize + 2] = 0;
         return Ok(vec![]);
     }
     if let Some(Value::Table(t)) = a.first() {
@@ -1890,7 +1926,10 @@ fn api_peek(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 fn api_poke(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let addr = arg_addr(&a, 0);
     for (k, v) in a.iter().enumerate().skip(1) {
-        let val = (v.as_number().unwrap_or(0.0) as i32 & 0xFF) as u8;
+        // Value floors (not truncates) first, same as arg_int: poke(0,-0.5)
+        // writes 0xff (flr(-0.5) == -1), not 0x00.
+        let f = v.as_number().unwrap_or(0.0);
+        let val = (safe_to_i32(f.floor()) & 0xFF) as u8;
         i.host().memory.poke(addr.wrapping_add((k - 1) as u16), val);
     }
     Ok(vec![])
@@ -1919,18 +1958,28 @@ fn api_poke4(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![])
 }
 fn api_memcpy(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    i.host().memory.memcpy(
-        arg_addr(&a, 0),
-        arg_addr(&a, 1),
-        arg_int(&a, 2).unwrap_or(0) as u16,
-    );
+    // A non-positive length is a no-op on official PICO-8. Without this guard,
+    // a negative length would wrap to a huge u16 below and blast a large
+    // chunk of RAM instead of leaving the destination untouched.
+    let len = arg_int(&a, 2).unwrap_or(0);
+    if len <= 0 {
+        return Ok(vec![]);
+    }
+    i.host()
+        .memory
+        .memcpy(arg_addr(&a, 0), arg_addr(&a, 1), len as u16);
     Ok(vec![])
 }
 fn api_memset(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    // Same non-positive-length no-op guard as api_memcpy.
+    let len = arg_int(&a, 2).unwrap_or(0);
+    if len <= 0 {
+        return Ok(vec![]);
+    }
     i.host().memory.memset(
         arg_addr(&a, 0),
         (arg_int(&a, 1).unwrap_or(0) & 0xFF) as u8,
-        arg_int(&a, 2).unwrap_or(0) as u16,
+        len as u16,
     );
     Ok(vec![])
 }

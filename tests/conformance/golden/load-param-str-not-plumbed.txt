@@ -1,0 +1,4 @@
+RESULT stat6_before_any_run 
+RESULT stat6_after_run_with_param alpha_param
+RESULT stat6_after_run_no_param alpha_param
+DONE

@@ -1,0 +1,5 @@
+RESULT cy_tall 36
+RESULT cy_pinball 24
+RESULT cy_normal 18
+RESULT cy_tall_then_off 18
+DONE

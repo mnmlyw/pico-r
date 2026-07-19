@@ -1,0 +1,7 @@
+RESULT stat46 3
+RESULT stat47 -1
+RESULT stat50 0
+RESULT stat51 -1
+RESULT stat16 3
+RESULT stat20 0
+DONE

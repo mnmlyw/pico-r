@@ -1,0 +1,7 @@
+RESULT before_pattern 0
+RESULT before_chan0_sfx 1
+RESULT after_pattern 0
+RESULT after_chan0_sfx -1
+RESULT chanstop_pattern 0
+RESULT chanstop_chan0_sfx -1
+DONE

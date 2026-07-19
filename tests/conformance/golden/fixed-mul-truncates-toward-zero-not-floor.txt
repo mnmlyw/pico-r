@@ -1,0 +1,8 @@
+RESULT mul_neg_a -559658
+RESULT mul_neg_b -1311
+RESULT mul_neg_c -4585407
+RESULT mul_pos_control 559657
+RESULT mul_friction_1 -55705
+RESULT mul_friction_2 -6
+RESULT mul_both_neg 559657
+DONE

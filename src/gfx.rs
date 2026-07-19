@@ -376,6 +376,96 @@ fn draw_oval(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8, f
     }
 }
 
+pub fn rrect(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, r: i32, col: u8) {
+    draw_rrect(memory, x0, y0, x1, y1, r, col, false);
+}
+
+pub fn rrectfill(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, r: i32, col: u8) {
+    draw_rrect(memory, x0, y0, x1, y1, r, col, true);
+}
+
+// PICO-8 0.2.4+ rrect/rrectfill: rrect(x0,y0,x1,y1,r,[col]),
+// rrectfill(x0,y0,x1,y1,r,[col]) -- the 5th arg is a corner-rounding
+// amount, NOT a color (col is always the optional 6th arg, defaulting to
+// the current pen color like every other draw primitive -- confirmed
+// against the official binary: rrect(...,7) with no col draws in the
+// default pen color 6, and an explicit 6th arg is honored and persists as
+// the new pen color same as get_color()'s usual behavior).
+//
+// Each corner is carved by the SAME midpoint-circle stepping as circ(),
+// using an effective radius of r+1. cuts[dy] is the inward pixel offset
+// (from the corner) at which row `dy` (0-indexed from the nearest
+// horizontal edge, 0..=r) starts being drawn/filled. Oracle-locked by a
+// full r=0..15 sweep (plus spot checks up to r=20) against the official
+// binary, reading each row's leftmost drawn column.
+fn rrect_corner_cuts(r: i32) -> Vec<i32> {
+    if r <= 0 {
+        return vec![0];
+    }
+    let big_r = r + 1;
+    let mut reach = vec![0i32; (big_r + 1) as usize];
+    let mut x = big_r;
+    let mut y: i32 = 0;
+    let mut d = 1 - big_r;
+    while x >= y {
+        reach[y as usize] = reach[y as usize].max(x);
+        reach[x as usize] = reach[x as usize].max(y);
+        y += 1;
+        if d < 0 {
+            d += 2 * y + 1;
+        } else {
+            x -= 1;
+            d += 2 * (y - x) + 1;
+        }
+    }
+    (0..=r)
+        .map(|dy| big_r - reach[(big_r - dy) as usize])
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_rrect(
+    memory: &mut Memory,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    r: i32,
+    col: u8,
+    fill: bool,
+) {
+    let (cam_x, cam_y) = get_camera(memory);
+    let (x0, x1) = (x0.min(x1) - cam_x, x0.max(x1) - cam_x);
+    let (y0, y1) = (y0.min(y1) - cam_y, y0.max(y1) - cam_y);
+    let w = x1 - x0;
+    let h = y1 - y0;
+    // Sanity clamp only (exact official clamp behavior for radii larger
+    // than the box is unverified): keeps the cuts table small and keeps
+    // top/bottom (or left/right) corner bands from crossing entirely.
+    let r = r.max(0).min(w.min(h)).min(256);
+    let cuts = rrect_corner_cuts(r);
+    let cut_at = |dy: i32| -> i32 {
+        if dy <= r {
+            cuts[dy as usize]
+        } else {
+            0
+        }
+    };
+    let mut y = y0;
+    while y <= y1 {
+        let dy = (y - y0).min(y1 - y);
+        let cut = cut_at(dy);
+        let (lx, rx) = (x0 + cut, x1 - cut);
+        if fill || y == y0 || y == y1 {
+            hline(memory, lx, rx, y, col);
+        } else {
+            put_pixel_raw(memory, lx, y, col);
+            put_pixel_raw(memory, rx, y, col);
+        }
+        y += 1;
+    }
+}
+
 /// tline(x0,y0,x1,y1, mx,my, mdx,mdy, layers) -- textured line.
 ///
 /// All screen coords and map coords are 16.16 fixed point (camera already

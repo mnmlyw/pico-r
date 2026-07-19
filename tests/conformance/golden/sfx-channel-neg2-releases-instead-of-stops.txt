@@ -1,0 +1,6 @@
+RESULT before 1
+RESULT after -1
+RESULT ch1_before 2
+RESULT ch1_after -1
+RESULT ch2_after_negativen 3
+DONE

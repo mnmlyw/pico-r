@@ -1,0 +1,5 @@
+RESULT peek_count_n0 0
+RESULT peek_count_nneg 0
+RESULT peek_count_n1 1
+RESULT peek_count_n2 2
+DONE

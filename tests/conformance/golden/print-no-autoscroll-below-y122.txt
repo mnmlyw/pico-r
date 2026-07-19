@@ -1,0 +1,4 @@
+RESULT cursor_y 118
+RESULT top_sum 0
+RESULT bot_sum 0
+DONE

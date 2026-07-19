@@ -1,0 +1,7 @@
+RESULT min_one_arg 0
+RESULT max_one_arg_neg 0
+RESULT min_three_args 5
+RESULT max_three_args 20
+RESULT min_two_args 5
+RESULT max_two_args 20
+DONE

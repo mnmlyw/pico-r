@@ -1,0 +1,6 @@
+RESULT rrect_outline_top 6
+RESULT rrect_outline_corner 0
+RESULT rrectfill_top 4
+RESULT rrectfill_fill 4
+RESULT rrectfill_corner 0
+DONE

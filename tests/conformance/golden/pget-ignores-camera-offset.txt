@@ -1,0 +1,9 @@
+RESULT pget_worldspace_while_cam_neg 9
+RESULT pget_rawscreen_while_cam_neg 0
+RESULT pget_rawscreen_after_reset_neg 9
+RESULT pget_worldspace_after_reset_neg 0
+RESULT pget_worldspace_while_cam_pos 6
+RESULT pget_rawscreen_while_cam_pos 0
+RESULT pget_rawscreen_after_reset_pos 6
+RESULT pget_worldspace_after_reset_pos 0
+DONE

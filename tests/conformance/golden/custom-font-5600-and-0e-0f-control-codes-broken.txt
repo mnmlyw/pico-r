@@ -1,0 +1,5 @@
+RESULT custom_glyph_litpixels 64
+RESULT retval_custom 8
+RESULT default_glyph_litpixels 9
+RESULT retval_default 4
+DONE

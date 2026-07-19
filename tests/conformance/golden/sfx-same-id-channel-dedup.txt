@@ -1,0 +1,5 @@
+RESULT ch0_sfx -1
+RESULT ch1_sfx -1
+RESULT ch2_sfx -1
+RESULT ch3_sfx 0
+DONE

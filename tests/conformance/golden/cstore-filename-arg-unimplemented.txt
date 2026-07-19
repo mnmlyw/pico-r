@@ -1,0 +1,5 @@
+RESULT rom0_before_any_cstore 0
+RESULT rom0_after_cstore_with_filename 0
+RESULT rom4_after_cstore_with_filename 0
+RESULT rom0_after_cstore_no_filename 222
+DONE

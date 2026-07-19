@@ -1,0 +1,6 @@
+RESULT memcpy_neglen 0
+RESULT memset_neglen 0
+RESULT memcpy_zerolen 0
+RESULT memset_zerolen 0
+RESULT memcpy_neglen_fwd 9
+DONE

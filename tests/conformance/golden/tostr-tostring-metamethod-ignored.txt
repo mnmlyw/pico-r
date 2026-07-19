@@ -1,0 +1,5 @@
+RESULT ts V(1)
+RESULT ts_tostr V(1)
+RESULT ts_plain table: 0x55518aec
+RESULT ts_num N=42
+DONE

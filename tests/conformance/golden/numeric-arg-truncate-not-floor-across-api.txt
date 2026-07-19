@@ -1,0 +1,16 @@
+RESULT sub_neg1_5 lo
+RESULT sub_neg0_5 o
+RESULT sub_1_5 hello
+RESULT chr_neg0_5 255
+RESULT chr_neg1_5 254
+RESULT mget_negx 0
+RESULT mget_0_5 5
+RESULT fget_negn t
+RESULT fget_0_5 t
+RESULT poke_negfrac 255
+RESULT poke_frac_up 255
+RESULT memset_val 7
+RESULT memset_val_neg 255
+RESULT spr_pixel_x0 15
+RESULT spr_pixel_xneg1 0
+DONE

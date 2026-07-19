@@ -1,0 +1,5 @@
+RESULT fillp_bytes_before_pal 204,51,0
+RESULT fillp_bytes_after_pal_reset 204,51,0
+RESULT fillp_bytes_before_pal2 0,0,0
+RESULT fillp_bytes_after_pal_reset2 0,0,0
+DONE

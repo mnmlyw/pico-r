@@ -1,0 +1,5 @@
+RESULT stat24_after_music0 -1
+RESULT stat57_after_music0 false
+RESULT stat24_after_stop -1
+RESULT stat57_after_stop false
+DONE
