@@ -530,3 +530,19 @@ Integrating the fixed-point branch alone did NOT fix `praxis_fighter_x-2`/`redas
 - Debug tooling that made the archaeology possible: `PICOR_LUA_OVERRIDE=<file>` runs alternate lua against a cart's real ROM (first boot only), mirroring official's `reload(...,file)` trick for byte-level divergence hunting on both engines.
 
 Corpus re-sweep: **187/188 clean, 188/188 CONFORMANT — zero regressions.** Every cart in the corpus now either runs clean under pico-r or (`basicshmupdc1-0`, unterminated long comment) fails identically on the official binary. **The corpus goal is met.**
+
+### Round 41: pixel conformance — the rasterizer locked to the oracle, byte-for-byte
+
+New probe methodology: probes dump the ENTIRE screen (0x6000-0x7fff) as hex over printh, flowing through the existing oracle/golden pipeline — no screenshots, fully deterministic. Seven probes cover lines, circles/ovals, rects/fillp, print/font (plus a complete 128-glyph wide-font reference), sprites/map from poked data, pal/clip/camera, and tline. px_lines and px_pal_clip_camera passed unchanged on first contact; everything else surfaced real engine bugs, all now byte-exact:
+
+- **fillp's transparency flag is the topmost FRACTION bit** (`0b...0101.1` = +0.5), not integer bit 0x10000 — we dropped it entirely, so pattern-1 pixels drew the secondary color where official leaves background. | `api_fillp`
+- **fillp pattern bits index MSB-first** (bit 15 = pixel (0,0), bit 0 = (3,3)) — ours was fully inverted, masked in earlier testing by bit-palindromic test patterns; exposed by 0b1111111111111110. | `put_pixel_raw`
+- **P8SCII `\*` repeat count decodes via the hex-digit param scheme** (0-9/a-f → 0-15), not the raw ASCII byte — `"\*5xy"` was flooding 53 repeats to the screen edge. | `draw_text`
+- **Wide glyphs (0x80-0xff) are 7px art on a fixed 8px advance**; our font table stored them as 4x6 narrow bitmaps (structurally unable to hold the real shapes) and advanced 4px. New `WIDE_FONT_DATA` extracted programmatically from the px_font_wide golden — every one of the 128 high glyphs is now bitmap-exact. | `gfx_font.rs`, `draw_text`/`draw_char`
+- **The oval rasterizer is a path-dependent integer midpoint walk, not any per-row quantization.** Model fitting plateaued at 27/32 shapes (two shapes with identical exact extents rasterize differently — no stateless formula can match), so the official binary was disassembled (it ships symbols: `_draw_oval`, `_draw_ellipse_1`) and the exact algorithm ported: error term `b²x(x+1) + a²y(y-1) - a²b²` with TRUNCATED quarter-square thresholds and radius-parity terms; degenerate boxes (x or y span differing by less than 2) draw as filled rects for BOTH oval() and ovalfill(). Validated 2048/2048 against a fresh 1..32 x 1..32 size-sweep corpus from the official binary. | `draw_oval`
+- **sspr samples at destination-pixel centers in 16.16**: `step = (src<<16)/dst` (truncating), accumulator starts at `step/2` — our floor-stepping picked different texels on downscales (per `_pico8_stretch_blit` disassembly, confirmed by golden decode). | `sspr`
+- **tline() implemented for real** (was a draw-nothing stub): exact port of `_draw_tline` — full 16.16 endpoint precision, DDA over max(|flrΔx|,|flrΔy|) steps, top-to-bottom normalization with step negation, map-coord wrap via 0x5F38-0x5F3B (reg-1 masks, 0 wraps at 256), cell 0 skip, layers via fget, palt/pal/fillp applied. The px_tline golden (51 drawn rows over poked map+sprite data) matches 0/128 differing. | `gfx::tline`, `api_tline`
+
+All seven pixel probes: **zero differing rows**. Full conformance suite green.
+
+Corpus re-sweep: **187/188 clean, 188/188 conformant — zero exit-code regressions** (screen-content baselines updated: rendering-accuracy fixes legitimately change drawn output across the corpus).

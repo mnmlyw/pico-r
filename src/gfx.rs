@@ -58,7 +58,10 @@ pub fn put_pixel_raw(memory: &mut Memory, sx: i32, sy: i32, col: u8) {
     if pat != 0 {
         let px = sx as u32 & 3;
         let py = sy as u32 & 3;
-        let bit_idx = py * 4 + px;
+        // Pattern bits index MSB-first: bit 15 is pixel (0,0), bit 0 is
+        // (3,3) -- oracle-locked by px_rect_fillp's 0b1111111111111110
+        // case (only (3,3) is pattern-0 there, not (0,0)).
+        let bit_idx = 15 - (py * 4 + px);
         if pat & (1 << bit_idx) != 0 {
             let fill_trans = memory.ram[memory::ADDR_FILL_PAT as usize + 2];
             if fill_trans & 0x1 != 0 {
@@ -275,76 +278,188 @@ pub fn ovalfill(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8
 }
 
 fn draw_oval(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8, fill: bool) {
-    // Per-row exact scan (not an incremental midpoint stepper): the
-    // previous single-loop midpoint-ellipse implementation could
-    // terminate before x reached 0, missing the top/bottom pole pixels
-    // entirely (confirmed against official PICO-8 even for an
-    // exact-integer bounding box, not just an odd-sized one). Scanning
-    // every row directly from the ellipse equation can't have that class
-    // of bug, and correctly handles half-integer centers/radii (odd
-    // bounding boxes) without truncating them first.
-    let (x0, x1) = (x0.min(x1), x0.max(x1));
-    let (y0, y1) = (y0.min(y1), y0.max(y1));
-    // x0..=x1 is an INCLUSIVE pixel range, so in continuous coordinates
-    // (each pixel `p` spans [p, p+1)) the box spans x0..(x1+1) -- confirmed
-    // row-by-row against official PICO-8: using (x1-x0)/2 as the radius
-    // (excluding the +1) shifts the whole curve and breaks top/bottom
-    // symmetry (rows above center came out too wide, rows below too
-    // narrow, and the bottom pole row vanished entirely).
-    let cx = (x0 + x1 + 1) as f64 / 2.0;
-    let cy = (y0 + y1 + 1) as f64 / 2.0;
-    let rx = (x1 - x0 + 1) as f64 / 2.0;
-    let ry = (y1 - y0 + 1) as f64 / 2.0;
-    if x0 == x1 && y0 == y1 {
-        put_pixel(memory, x0, y0, col);
+    // Exact port of the official rasterizer (reverse-engineered from the
+    // PICO-8 binary's draw_oval/draw_filloval + draw_ellipse_1 /
+    // fill_ellipse_1): an integer midpoint walk of the quarter arc from
+    // (0,b) to (a,0) where cx=(x0+x1)>>1, a=(x1-x0)>>1, px/py the box
+    // parities. The error term tracks
+    //   err = b^2*x*(x+1) + a^2*y*(y-1) - a^2*b^2
+    // and the step thresholds use TRUNCATED quarter squares plus the
+    // RADIUS parity (a&1 / b&1) -- both quirks are oracle-locked by a
+    // full 1..=32 x 1..=32 size sweep against the official binary
+    // (1024/1024 outline + 1024/1024 fill). Verified byte-exact.
+    let (cam_x, cam_y) = get_camera(memory);
+    let (x0, x1) = (x0.min(x1) - cam_x, x0.max(x1) - cam_x);
+    let (y0, y1) = (y0.min(y1) - cam_y, y0.max(y1) - cam_y);
+    let w = x1 - x0;
+    let h = y1 - y0;
+    if h < 2 || w < 2 {
+        // Degenerate boxes (thinner than 3px either way) are drawn as
+        // FILLED rects by both oval() and ovalfill() -- matches the
+        // official hline fallback path.
+        for yy in y0..=y1 {
+            for xx in x0..=x1 {
+                put_pixel_raw(memory, xx, yy, col);
+            }
+        }
         return;
     }
-    for py in y0..=y1 {
-        // Sample at the pixel's vertical center.
-        let dy = (py as f64 + 0.5) - cy;
-        let t = 1.0 - (dy / ry) * (dy / ry);
-        if t < 0.0 {
-            continue;
+    let cx = (x0 + x1) >> 1;
+    let cy = (y0 + y1) >> 1;
+    let a = (w >> 1) as i64;
+    let b = (h >> 1) as i64;
+    let px = w & 1;
+    let py = h & 1;
+    let aa = a * a;
+    let bb = b * b;
+    let thr_x = -(aa / 4 + (a & 1) + bb);
+    let thr_y = -(bb / 4 + (b & 1));
+    let thr_diag = -(bb / 4 + (b & 1) + aa);
+    let mut err = -aa * b;
+    let mut dxs: i64 = 0;
+    let mut dys = -2 * aa * b;
+    let mut x: i64 = 0;
+    let mut y: i64 = b;
+    let hline = |memory: &mut Memory, xa: i32, xb: i32, yy: i32| {
+        for xx in xa..=xb {
+            put_pixel_raw(memory, xx, yy, col);
         }
-        let dx_extent = rx * t.sqrt();
-        // A column's CENTER (px+0.5) must fall within [cx-dx_extent,
-        // cx+dx_extent] for that column to be part of the shape.
-        let lx = (cx - dx_extent - 0.5).ceil() as i32;
-        let rx2 = (cx + dx_extent - 0.5).floor() as i32;
-        if fill {
-            // Not hline(): it calls put_pixel_raw directly and skips the
-            // camera-offset transform that put_pixel applies.
-            let mut px = lx;
-            while px <= rx2 {
-                put_pixel(memory, px, py, col);
-                px += 1;
+    };
+    loop {
+        let xi = x as i32;
+        let yi = y as i32;
+        // y > -py / x > -px guards stop the mirrored halves from
+        // re-plotting the shared center row/column when the box has an
+        // odd pixel count on that axis.
+        let y_mirror = y > 0 || py == 1;
+        let x_mirror = x > 0 || px == 1;
+        if !fill {
+            put_pixel_raw(memory, cx + px + xi, cy + py + yi, col);
+            if y_mirror && x_mirror {
+                put_pixel_raw(memory, cx - xi, cy - yi, col);
+            }
+            if y_mirror {
+                put_pixel_raw(memory, cx + px + xi, cy - yi, col);
+            }
+            if x_mirror {
+                put_pixel_raw(memory, cx - xi, cy + py + yi, col);
+            }
+        }
+        if x * bb + err > thr_x && y * aa + err > thr_y {
+            // About to move down a row: the fill emits this row's spans
+            // now, using the current (maximal) x for the row.
+            if fill {
+                hline(memory, cx - xi, cx + px + xi, cy - yi);
+                if y_mirror {
+                    hline(memory, cx - xi, cx + px + xi, cy + py + yi);
+                }
+            }
+            if err - y * aa <= thr_diag {
+                x += 1;
+                dxs += 2 * bb;
+                y -= 1;
+                dys += 2 * aa;
+                err += dxs + dys;
+            } else {
+                y -= 1;
+                dys += 2 * aa;
+                err += dys;
             }
         } else {
-            put_pixel(memory, lx, py, col);
-            put_pixel(memory, rx2, py, col);
+            x += 1;
+            dxs += 2 * bb;
+            err += dxs;
+        }
+        if y < 0 || x > a {
+            break;
         }
     }
-    if !fill {
-        // A row-only scan leaves gaps near the top/bottom poles: official
-        // PICO-8 draws a flat horizontal run of several pixels there
-        // (confirmed -- e.g. the very top row of a wide, short oval has
-        // ~11 pixels lit, not just its 2 boundary columns), because the
-        // curve is nearly horizontal in that region. A column scan (top
-        // and bottom per column) naturally fills exactly that gap, the
-        // same way the row scan handles the near-vertical left/right
-        // regions -- together they give a complete, gap-free outline.
-        for px in x0..=x1 {
-            let dx = (px as f64 + 0.5) - cx;
-            let t = 1.0 - (dx / rx) * (dx / rx);
-            if t < 0.0 {
-                continue;
+}
+
+/// tline(x0,y0,x1,y1, mx,my, mdx,mdy, layers) -- textured line.
+///
+/// All screen coords and map coords are 16.16 fixed point (camera already
+/// subtracted by the caller, in fixed point). Exact port of the official
+/// draw_tline (reverse-engineered from the binary):
+///  - the pixel walk is a DDA over n = max(|flr(x1)-flr(x0)|,
+///    |flr(y1)-flr(y0)|) steps (n+1 pixels inclusive), stepping
+///    (d<<16)/n per axis from the FLOORED start pixel's center; lines are
+///    normalized to walk top-to-bottom (endpoints swapped and mdx/mdy
+///    negated, with mx/my advanced to the far end, when y1<y0).
+///  - per pixel: map cell = ((mx>>16) & (peek(0x5F38)-1)) + peek(0x5F3A)
+///    (mask is reg-1, so 0 = wrap at 256), same for y with 0x5F39/0x5F3B;
+///    cell 0 draws nothing unless the 0x5F36 bit 0x8 "draw tile 0" flag is
+///    set; a nonzero `layers` mask requires (fget(cell) & layers) != 0;
+///    the texel is (cell%16)*8 + ((mx>>13)&7) into the sprite sheet;
+///    palt-transparent colors are skipped; then mx += mdx, my += mdy.
+#[allow(clippy::too_many_arguments)]
+pub fn tline(
+    memory: &mut Memory,
+    x0f: i32,
+    y0f: i32,
+    x1f: i32,
+    y1f: i32,
+    mut mx: i32,
+    mut my: i32,
+    mut mdx: i32,
+    mut mdy: i32,
+    layers: i32,
+) {
+    let x0i = x0f >> 16;
+    let y0i = y0f >> 16;
+    let x1i = x1f >> 16;
+    let y1i = y1f >> 16;
+    let mut dx = (x1i - x0i) as i64;
+    let mut dy = (y1i - y0i) as i64;
+    let n = dx.abs().max(dy.abs());
+    let (sx, sy) = if y1i < y0i {
+        // Walk top-to-bottom: swap endpoints, advance the map sample to
+        // the far end and negate the steps so each pixel samples the same
+        // map position it would have in the original direction.
+        mx = mx.wrapping_add((n as i32).wrapping_mul(mdx));
+        my = my.wrapping_add((n as i32).wrapping_mul(mdy));
+        mdx = mdx.wrapping_neg();
+        mdy = mdy.wrapping_neg();
+        dx = -dx;
+        dy = -dy;
+        (x1i, y1i)
+    } else {
+        (x0i, y0i)
+    };
+    let (step_x, step_y) = if n != 0 {
+        ((dx << 16) / n, (dy << 16) / n)
+    } else {
+        (0, 0)
+    };
+    let mut xf = ((sx as i64) << 16) + 0x8000;
+    let mut yf = ((sy as i64) << 16) + 0x8000;
+    let wmask = (memory.ram[0x5F38] as i32).wrapping_sub(1) & 0xFF;
+    let hmask = (memory.ram[0x5F39] as i32).wrapping_sub(1) & 0xFF;
+    let xoff = memory.ram[0x5F3A] as i32;
+    let yoff = memory.ram[0x5F3B] as i32;
+    let draw_zero = memory.ram[0x5F36] & 0x8 != 0;
+    for _ in 0..=n {
+        let cell_x = ((mx >> 16) & wmask) + xoff;
+        let cell_y = ((my >> 16) & hmask) + yoff;
+        let cell = map_get_wide(memory, cell_x, cell_y) as i32;
+        if cell != 0 || draw_zero {
+            let layer_ok = layers == 0 || {
+                let flags = memory.ram[memory::ADDR_FLAGS as usize + cell as usize];
+                (flags as i32) & layers != 0
+            };
+            if layer_ok {
+                let tx = (cell % 16) * 8 + ((mx >> 13) & 7);
+                let ty = (cell / 16) * 8 + ((my >> 13) & 7);
+                let col = memory.sprite_get(tx as u8, ty as u8);
+                if !is_transparent(memory, col) {
+                    put_pixel_raw(memory, (xf >> 16) as i32, (yf >> 16) as i32, col);
+                }
             }
-            let dy_extent = ry * t.sqrt();
-            let ty = (cy - dy_extent - 0.5).ceil() as i32;
-            let by = (cy + dy_extent - 0.5).floor() as i32;
-            put_pixel(memory, px, ty, col);
-            put_pixel(memory, px, by, col);
         }
+        xf += step_x;
+        yf += step_y;
+        mx = mx.wrapping_add(mdx);
+        my = my.wrapping_add(mdy);
     }
 }
 
@@ -437,10 +552,20 @@ pub fn sspr(
         }
     }
 
+    // Sampling rule (matches the official pico8_stretch_blit, confirmed by
+    // disassembly and oracle-locked by px_spr_map's 16x8 -> 8x4 case):
+    // 16.16 fixed-point stepping with step = (src<<16)/dst (truncating
+    // division) and the accumulator starting at step/2 -- i.e. sampling at
+    // the destination pixel CENTER, src = (step/2 + i*step) >> 16. A plain
+    // floor(i*src/dst) picks texel 2i instead of 2i+1 on 2:1 downscales.
+    let step_x = ((sw as i64) << 16) / dw as i64;
+    let step_y = ((sh as i64) << 16) / dh as i64;
     for py in 0..dh {
         for px in 0..dw {
-            let sx_off = (if flip_x { dw - 1 - px } else { px }) * sw / dw;
-            let sy_off = (if flip_y { dh - 1 - py } else { py }) * sh / dh;
+            let ix = (if flip_x { dw - 1 - px } else { px }) as i64;
+            let iy = (if flip_y { dh - 1 - py } else { py }) as i64;
+            let sx_off = (((step_x >> 1) + ix * step_x) >> 16) as i32;
+            let sy_off = (((step_y >> 1) + iy * step_y) >> 16) as i32;
             if sx_off < 0 || sx_off >= sw || sy_off < 0 || sy_off >= sh {
                 continue;
             }
@@ -614,12 +739,17 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
         match ch {
             0x01 => {
                 if i + 1 < text.len() {
-                    let count = text[i];
+                    // `\*` param char decodes through the same hex-digit
+                    // scheme as `\f` (0-9/a-f -> 0-15), NOT its raw ASCII
+                    // byte value -- oracle-locked by px_print_font's
+                    // `\*5xy` (repeats "x" 5 times, then draws "y", ~24px
+                    // total), not a count of 0x35 flooding the whole line.
+                    let count = parse_hex_color(text[i]);
                     let rch = text[i + 1];
                     i += 2;
                     for _ in 0..count {
                         draw_char(memory, rch, x, y, color);
-                        x += char_w;
+                        x += char_width(rch, char_w);
                     }
                 }
             }
@@ -727,7 +857,7 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
             0x0F => char_w = 4,
             _ => {
                 draw_char(memory, ch, x, y, color);
-                x += char_w;
+                x += char_width(ch, char_w);
             }
         }
         // print()'s return value is the right-most x reached at any point
@@ -739,7 +869,29 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
     max_x + cam_x
 }
 
+// Wide P8SCII glyphs (0x80-0xff) always advance the cursor by a fixed 8px
+// (7px of art + 1px spacing), ignoring the narrow-glyph char_w setting --
+// oracle-locked by px_print_font's "\x83\x86\x88" line, whose 3 glyphs sit
+// 8px apart regardless of the (default 4px) char_w in effect.
+fn char_width(code: u8, char_w: i32) -> i32 {
+    if code >= 0x80 {
+        8
+    } else {
+        char_w
+    }
+}
+
 fn draw_char(memory: &mut Memory, code: u8, x: i32, y: i32, col: u8) {
+    if code >= 0x80 {
+        for py in 0..8u8 {
+            for px in 0..8u8 {
+                if gfx_font::get_wide_pixel(code, px, py) {
+                    put_pixel_no_cam(memory, x + px as i32, y + py as i32, col);
+                }
+            }
+        }
+        return;
+    }
     for py in 0..6u8 {
         for px in 0..4u8 {
             if gfx_font::get_pixel(code, px, py) {

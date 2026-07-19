@@ -1732,7 +1732,15 @@ fn api_fillp(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let int_val = safe_to_i32(p) as u32;
     st.memory
         .poke16(mem::ADDR_FILL_PAT, (int_val & 0xFFFF) as u16);
-    let trans = if int_val & 0x10000 != 0 { 1 } else { 0 };
+    // The transparency flag is the topmost FRACTION bit (`0b...0101.1`,
+    // i.e. +0.5), not an integer bit -- oracle-locked by px_rect_fillp:
+    // with it set, pattern-1 pixels are left undrawn even when the color
+    // arg carries a secondary color in its high nibble.
+    let trans = if (p * 65536.0) as i64 & 0x8000 != 0 {
+        1
+    } else {
+        0
+    };
     st.memory.ram[mem::ADDR_FILL_PAT as usize + 2] = trans;
     Ok(vec![])
 }
@@ -2240,15 +2248,35 @@ fn api_load(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![])
 }
 // `tline(x0,y0,x1,y1,mx,my,[mdx,mdy],[layers])` draws a textured line,
-// sampling colors from the map/sprite region as it steps -- confirmed a
-// real API function via oracle (doesn't error), but stubbed as a no-op:
-// getting its raster algorithm (exact per-pixel step count, coordinate
-// space across PICO-8 versions, the optional `layers` mask) right needs
-// careful oracle verification against real sprite/map data this session's
-// probe carts don't have. Unblocks a real corpus cart from crashing
-// (tomorrow-6.p8.png) at the cost of not drawing anything -- same
-// no-crash-first tradeoff as the other host-integration stubs here.
-fn api_tline(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+// sampling colors from the map/sprite region as it steps. All coordinate
+// arguments keep their full 16.16 fixed-point precision (screen endpoints
+// included -- the official binary passes them through un-floored and
+// subtracts the camera in fixed point). mdx defaults to 1/8, mdy to 0.
+// The rasterization itself lives in gfx::tline (an exact port of the
+// disassembled official draw_tline); oracle-locked by px_tline.
+// The 0-arg / 1-arg forms are the official binary's undocumented
+// "tline precision" get/set; not modeled here (no probe coverage), so
+// they remain no-ops.
+fn api_tline(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    if a.len() < 4 {
+        return Ok(vec![]);
+    }
+    // PICO-8 numbers are 16.16 fixed; the interp's f64 values are exact
+    // multiples of 2^-16, so this conversion is lossless.
+    let fix = |idx: usize, d: f64| -> i32 { (opt_num(&a, idx, d) * 65536.0).floor() as i64 as i32 };
+    let st = i.host();
+    let (cam_x, cam_y) = gfx::get_camera(&st.memory);
+    let x0 = fix(0, 0.0).wrapping_sub(cam_x << 16);
+    let y0 = fix(1, 0.0).wrapping_sub(cam_y << 16);
+    let x1 = fix(2, 0.0).wrapping_sub(cam_x << 16);
+    let y1 = fix(3, 0.0).wrapping_sub(cam_y << 16);
+    let mx = fix(4, 0.0);
+    let my = fix(5, 0.0);
+    let mdx = fix(6, 0.125);
+    let mdy = fix(7, 0.0);
+    // The layers mask is the INTEGER part of the argument only.
+    let layers = fix(8, 0.0) >> 16;
+    gfx::tline(&mut st.memory, x0, y0, x1, y1, mx, my, mdx, mdy, layers);
     Ok(vec![])
 }
 // `_set_fps(n)` overrides the target frame rate to an arbitrary value
