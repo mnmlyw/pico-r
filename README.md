@@ -16,7 +16,7 @@ A complete PICO-8 runtime implemented in safe Rust as a single ~360 KB WebAssemb
 - **Preprocessor** — transforms PICO-8's Lua dialect (short-if/while, compound assignment incl. `^=`, `!=`, peek shortcuts `@`/`%`/`$`, binary literals, bitwise ops `>>`/`<<`/`<<>`/`>>>`/`>><`/`^^`, integer division `\`, `?` print, P8SCII glyph identifiers and glyph-to-button-ID) to standard Lua 5.2, operating on raw bytes end-to-end so high-byte glyphs survive as identifier characters
 - **Hand-rolled Lua VM** — purpose-built lexer + parser + tree-walking interpreter. No piccolo or other Lua VM dependency. Tables with metatables and insertion-ordered storage, closures, upvalues, varargs, multi-return, real `local _ENV` scoping, `goto`/labels, `repeat..until` with proper body-scope condition evaluation, and coroutines (native builds; the wasm build has no threads and compiles them out)
 - **Bit-exact numbers** — true 16.16 fixed-point quantization on literals and arithmetic, PICO-8's actual `rnd()`/`srand()` PRNG algorithm, and z8lua's `sin`/`cos`/`atan2` lookup tables, all locked to the official binary's output
-- **Graphics** — pset/line/rect/circ (incl. inverted fill)/oval/spr/sspr/map/print with full P8SCII control codes, pal, fillp, clip, camera (`tline` is currently a parse-but-draw-nothing stub)
+- **Graphics** — pset/line/rect/circ (incl. inverted fill)/oval/spr/sspr/map/tline/print with full P8SCII control codes, pal, fillp, clip, camera — the rasterizer is oracle-locked byte-exact against the official binary (see Conformance testing below)
 - **Audio** — 4-channel waveform synthesis at 22050 Hz (8 waveforms + custom instruments via child SFX), all 8 SFX effects (slide, vibrato, drop, fade in/out, arpeggio fast/slow), music pattern sequencing with fade
 - **Memory** — flat 65536-byte RAM matching PICO-8 layout (sprites, map, SFX, draw state, screen, big-map region at 0x8000+ incl. the 0x5F56/0x5F57 custom map registers)
 - **Multi-cart** — real `load()` cart switching with breadcrumb return via `extcmd("breadcrumb")`, external-file `reload()`, and high-RAM (0x8000+) persistence across switches — enough to run BBS games that stage data through a companion cart
@@ -132,7 +132,6 @@ cargo test --test conformance                        # every probe must match it
 Goldens are checked in, so CI and contributors never need the PICO-8 binary. `tests/conformance/LEDGER.md` is the running log of every divergence found and fixed, with the evidence for each.
 
 ## Known limitations
-- **`tline()` draws nothing** — parsed and callable, but its raster algorithm hasn't been oracle-verified yet, so it's a deliberate no-op rather than a wrong guess.
 - **No coroutines on the WASM build** (no threads there; native builds have them via OS threads).
 - **Frame pacing** — `_set_fps()` and `menuitem()` are accepted but inert; the host drives the frame rate.
 - **Cross-session save/load drops closures stored in tables** (the same-session in-memory snapshot path preserves them).
