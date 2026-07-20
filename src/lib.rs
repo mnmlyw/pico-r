@@ -285,6 +285,19 @@ pub extern "C" fn web_get_pixel_buffer() -> *const u32 {
     }
 }
 
+/// Read a single RAM byte -- exposes nothing a cart can't already read via
+/// its own `peek()`, but lets an external headless harness (see
+/// tools/wasm-test/) inspect engine state (palette remap, screen memory,
+/// draw registers, ...) directly against the real `pico_r.wasm` artifact
+/// without needing a browser.
+#[no_mangle]
+pub extern "C" fn web_debug_peek(addr: u32) -> u8 {
+    match engine_mut() {
+        Some(e) => e.state.memory.ram[(addr as usize) & 0xFFFF],
+        None => 0,
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn web_set_buttons(player: u8, buttons: u8) {
     if let Some(e) = engine_mut() {
