@@ -2109,6 +2109,18 @@ fn api_cstore(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     } else {
         arg_int(&a, 2).unwrap_or(0) as u16
     };
+    // A 4th filename argument targets a DIFFERENT cart's rom -- the write
+    // must never land in the CURRENT cart's own rom in that case
+    // (oracle-confirmed: cstore(...,"other.p8") leaves this cart's own
+    // rom completely unchanged, even at addresses a no-filename cstore
+    // would happily write). Writing the named external cart's own file
+    // isn't implemented (a real fix needs to resolve, read, patch, and
+    // rewrite that cart's own data section on disk) -- left as a gap;
+    // this only fixes the confirmed, independently-real part: don't
+    // corrupt the CURRENT cart's rom when a filename is given.
+    if matches!(a.get(3), Some(Value::Str(_))) {
+        return Ok(vec![]);
+    }
     let st = i.host();
     for k in 0..len {
         let dst_addr = dst.wrapping_add(k);

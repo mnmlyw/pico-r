@@ -37,6 +37,7 @@ impl Parser {
         if !self.is(&Tok::Eof) {
             return Err(self.err("unexpected token after chunk"));
         }
+        validate_gotos(&block)?;
         Ok(block)
     }
 
@@ -581,4 +582,58 @@ fn is_assignable(e: &Expr) -> bool {
 
 fn is_call(e: &Expr) -> bool {
     matches!(e, Expr::Call(_, _) | Expr::MethodCall(_, _, _))
+}
+
+// Confirmed against official PICO-8: a forward `goto` that skips over a
+// `local` declaration to a label LATER in the same block is a load-time
+// error ("jumps into the scope of local") -- UNLESS the label is the
+// block's own LAST statement, which is exempt (oracle-confirmed: the
+// common `for ... do if cond then goto continue end; local y=...;
+// ::continue:: end` idiom, jumping over `local y` to a `::continue::`
+// at the very end of the loop body, runs fine on real hardware). Only
+// checks gotos/labels within the SAME flat statement list -- a goto
+// targeting a label in an enclosing block is jumping OUT, never INTO a
+// new local's scope, so it's never subject to this rule.
+fn validate_gotos(block: &Block) -> Result<(), ParseError> {
+    for stat in &block.stats {
+        match stat {
+            Stat::Do(b) => validate_gotos(b)?,
+            Stat::While(_, b) => validate_gotos(b)?,
+            Stat::Repeat(b, _) => validate_gotos(b)?,
+            Stat::If(arms, else_b) => {
+                for (_, b) in arms {
+                    validate_gotos(b)?;
+                }
+                if let Some(b) = else_b {
+                    validate_gotos(b)?;
+                }
+            }
+            Stat::NumericFor(_, _, _, _, b) => validate_gotos(b)?,
+            Stat::GenericFor(_, _, b) => validate_gotos(b)?,
+            _ => {}
+        }
+    }
+    let n = block.stats.len();
+    for (gi, gstat) in block.stats.iter().enumerate() {
+        let Stat::Goto(name) = gstat else { continue };
+        for li in (gi + 1)..n {
+            let Stat::Label(lname) = &block.stats[li] else {
+                continue;
+            };
+            if lname != name {
+                continue;
+            }
+            let has_local = block.stats[gi + 1..li]
+                .iter()
+                .any(|s| matches!(s, Stat::LocalAssign(..) | Stat::LocalFunction(..)));
+            if has_local && li != n - 1 {
+                return Err(ParseError {
+                    msg: format!("<goto {}> jumps into the scope of a local", name),
+                    line: block.stat_lines.get(li).copied().unwrap_or(block.line),
+                });
+            }
+            break;
+        }
+    }
+    Ok(())
 }

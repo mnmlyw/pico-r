@@ -1064,6 +1064,14 @@ pub fn draw_text(
     let mut invert = false;
     let mut bg_color: Option<u8> = None;
     let mut pinball = false;
+    // `\014`/`\015` (0x0E/0x0F) toggle between the CUSTOM font (glyph N's
+    // bitmap at `0x5600 + N*8`, one byte per row MSB-first = leftmost
+    // pixel, `width`/`height` read from `0x5600`/`0x5602`) and the
+    // default built-in font -- oracle-confirmed via a filled-solid custom
+    // font: `\014A` renders the full custom glyph (all bits set -> a
+    // solid 8x8 block), while `\015A` reverts to the ORDINARY built-in
+    // 'A' glyph, not just a narrower custom one.
+    let mut custom_font = false;
     // `\v` (0x0B) "decorate previous character": anchor is NOT the current
     // draw cursor but a one-token-delayed snapshot of it (see comment at
     // the 0x0B arm) -- oracle-locked against a chain of `\v` decorations
@@ -1098,7 +1106,17 @@ pub fn draw_text(
                         anchor_x = x;
                         anchor_y = y;
                         draw_styled_char(
-                            memory, rch, x, y, color, wide, tall, invert, bg_color, pinball,
+                            memory,
+                            rch,
+                            x,
+                            y,
+                            color,
+                            wide,
+                            tall,
+                            invert,
+                            bg_color,
+                            pinball,
+                            custom_font,
                         );
                         x += char_width(rch, char_w);
                     }
@@ -1146,6 +1164,7 @@ pub fn draw_text(
                             invert,
                             bg_color,
                             pinball,
+                            custom_font,
                         );
                         x += char_width(dch, char_w);
                     }
@@ -1305,8 +1324,14 @@ pub fn draw_text(
                 }
             }
             0x0D => x = start_x - cam_x,
-            0x0E => char_w = 8,
-            0x0F => char_w = 4,
+            0x0E => {
+                custom_font = true;
+                char_w = memory.ram[0x5600] as i32;
+            }
+            0x0F => {
+                custom_font = false;
+                char_w = 4;
+            }
             // `\vN` (0x0B): "decorate previous character" -- draw the NEXT
             // character offset from an ANCHOR point on a 4x4 grid (x in
             // the low 2 bits, spanning -2..+1; y in the high bits, -8
@@ -1343,6 +1368,7 @@ pub fn draw_text(
                             invert,
                             bg_color,
                             pinball,
+                            custom_font,
                         );
                         anchor_x = cur_x;
                         anchor_y = cur_y;
@@ -1353,7 +1379,17 @@ pub fn draw_text(
                 anchor_x = x;
                 anchor_y = y;
                 draw_styled_char(
-                    memory, ch, x, y, color, wide, tall, invert, bg_color, pinball,
+                    memory,
+                    ch,
+                    x,
+                    y,
+                    color,
+                    wide,
+                    tall,
+                    invert,
+                    bg_color,
+                    pinball,
+                    custom_font,
                 );
                 x += char_width(ch, char_w);
             }
@@ -1380,6 +1416,17 @@ fn char_width(code: u8, char_w: i32) -> i32 {
     }
 }
 
+// Custom font (`\014`, 0x0E) glyph bit lookup: glyph N's bitmap is a
+// fixed 8 bytes at `0x5600 + N*8` (one byte per row, regardless of the
+// configured height -- oracle-confirmed a height=4 custom font still
+// uses an 8-byte stride, not 4), MSB-first (bit 7 = leftmost column) --
+// oracle-locked via an asymmetric per-row bit pattern (0x81 -> lit at
+// both x=0 and x=7).
+fn custom_font_pixel(memory: &Memory, code: u8, px: u8, py: u8) -> bool {
+    let addr = (0x5600usize + code as usize * 8 + py as usize) & 0xFFFF;
+    memory.ram[addr] & (0x80 >> px) != 0
+}
+
 // General glyph blit honouring the P8SCII rendering-attribute state
 // (wide/tall pixel-doubling, invert, opaque background, pinball). With
 // every flag at its default (false/false/false/None/false) this produces
@@ -1397,15 +1444,24 @@ fn draw_styled_char(
     invert: bool,
     bg: Option<u8>,
     pinball: bool,
+    custom_font: bool,
 ) {
     if pinball {
         // Sparse dot-matrix rendering: one screen pixel per ON font
         // pixel, at the top-right subpixel of the 2x2-doubled block
         // (see the `\^p` handler comment for the golden decode).
-        let (bw, bh): (u8, u8) = if code >= 0x80 { (8, 8) } else { (4, 6) };
+        let (bw, bh): (u8, u8) = if custom_font {
+            (memory.ram[0x5600], memory.ram[0x5602])
+        } else if code >= 0x80 {
+            (8, 8)
+        } else {
+            (4, 6)
+        };
         for py in 0..bh {
             for px in 0..bw {
-                let on = if code >= 0x80 {
+                let on = if custom_font {
+                    custom_font_pixel(memory, code, px, py)
+                } else if code >= 0x80 {
                     gfx_font::get_wide_pixel(code, px, py)
                 } else {
                     gfx_font::get_pixel(code, px, py)
@@ -1418,7 +1474,13 @@ fn draw_styled_char(
         return;
     }
 
-    let (bw, bh): (u8, u8) = if code >= 0x80 { (8, 8) } else { (4, 6) };
+    let (bw, bh): (u8, u8) = if custom_font {
+        (memory.ram[0x5600], memory.ram[0x5602])
+    } else if code >= 0x80 {
+        (8, 8)
+    } else {
+        (4, 6)
+    };
     let mult_x = if wide { 2 } else { 1 };
     let mult_y = if tall { 2 } else { 1 };
 
@@ -1446,7 +1508,9 @@ fn draw_styled_char(
 
     for py in 0..bh {
         for px in 0..bw {
-            let on = if code >= 0x80 {
+            let on = if custom_font {
+                custom_font_pixel(memory, code, px, py)
+            } else if code >= 0x80 {
                 gfx_font::get_wide_pixel(code, px, py)
             } else {
                 gfx_font::get_pixel(code, px, py)

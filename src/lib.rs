@@ -243,12 +243,15 @@ pub extern "C" fn web_update() {
     engine.state.memory.ram[memory::ADDR_INPUT_P0 as usize] = engine.state.input.btn_state[0];
     engine.state.memory.ram[memory::ADDR_INPUT_P1 as usize] = engine.state.input.btn_state[1];
 
-    engine.lua.call_update(&mut engine.state);
-    engine.lua.call_draw(&mut engine.state);
-
+    // Confirmed against official PICO-8: elapsed_time/frame_count tick up
+    // BEFORE this frame's _update/_draw run, not after -- see
+    // elapsed-time-ticks-before-not-after-frame-callbacks.
     engine.state.frame_count += 1;
     engine.state.target_fps = if engine.lua.use_60fps() { 60 } else { 30 };
     engine.state.elapsed_time += 1.0 / engine.state.target_fps as f64;
+
+    engine.lua.call_update(&mut engine.state);
+    engine.lua.call_draw(&mut engine.state);
 
     // If the Lua engine has an error, paint it on the screen so it's visible.
     if engine.lua.had_error() {

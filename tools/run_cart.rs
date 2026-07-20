@@ -145,6 +145,15 @@ fn run_main() {
             }
             state.input.update();
             state.memory.ram[0x5F4C] = state.input.btn_state[0];
+            // Confirmed against official PICO-8: elapsed_time/frame_count
+            // tick up BEFORE this frame's _update/_draw run, not after --
+            // the oracle's very FIRST _update call already reads a t()
+            // that includes this frame's own tick (2 ticks total counting
+            // the boot tick), not just the boot tick alone. See
+            // elapsed-time-ticks-before-not-after-frame-callbacks.
+            state.frame_count += 1;
+            state.target_fps = if lua.use_60fps() { 60 } else { 30 };
+            state.elapsed_time += 1.0 / state.target_fps as f64;
             lua.call_update(&mut state);
             if lua.had_error() {
                 let msg = lua.error_message();
@@ -175,9 +184,6 @@ fn run_main() {
                 eprintln!("DRAW ERROR (frame {}): {}", f, msg);
                 std::process::exit(5);
             }
-            state.frame_count += 1;
-            state.target_fps = if lua.use_60fps() { 60 } else { 30 };
-            state.elapsed_time += 1.0 / state.target_fps as f64;
         }
         eprintln!("ok, ran {} frames clean", n_frames);
         report_and_exit(&mut state);
