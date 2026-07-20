@@ -2,13 +2,29 @@
 # Discovered by an automated corpus/spec-audit sweep; each probe+golden pair
 # is real evidence of a divergence from official PICO-8, just not yet acted
 # on. Remove a line once its engine fix lands and the probe matches.
-fillp-sprite-apply-gate-missing
 p8scii-utf8-glyph-not-decoded
-flip-during-init-no-present
-metamethod-dispatch-missing
-fillp-sprite-map-tline-unconditional-apply
-fixed-mul-truncates-toward-zero-not-floor
-color-arg-high-bits-dropped
+# elapsed-time-ticks-before-not-after-frame-callbacks: found while fixing
+# flip-during-init-no-present (that gap's own fix -- a missing "boot tick"
+# before the top-level chunk/first _init even runs -- is landed and that
+# probe now passes). This is a SEPARATE bug spotted along the way: once
+# per-frame execution is underway, t()/time() should tick up BEFORE that
+# frame's _update/_draw run (oracle: the FIRST _update call already sees
+# 2 ticks' worth, not 1), but pico-r's engine (src/lib.rs's web_update,
+# tools/run_cart.rs's frame loop) increments elapsed_time/frame_count
+# AFTER calling call_update/call_draw each frame. Deliberately left as a
+# newly-cataloged, not-yet-fixed gap rather than folded into the same
+# round as the boot-tick fix -- it touches the live per-frame ordering in
+# the actual production engine (not just a test harness), which deserves
+# its own careful regression pass across the corpus separately.
+elapsed-time-ticks-before-not-after-frame-callbacks
+# tostr-tostring-metamethod-ignored: the actual bug (tostring()/tostr()
+# ignoring a table's __tostring metamethod) is fixed and 3 of the golden's
+# 4 RESULT lines match byte-exact. The 4th (a plain table's default
+# "table: 0xADDR" display) bakes in the OFFICIAL binary's own heap address
+# from whenever the golden was captured -- that address can never be
+# reproduced by any implementation running as a different process, so this
+# probe can't fully graduate regardless of correctness. Left listed rather
+# than fabricating a matching address.
 tostr-tostring-metamethod-ignored
 custom-font-5600-and-0e-0f-control-codes-broken
 print-no-autoscroll-below-y122

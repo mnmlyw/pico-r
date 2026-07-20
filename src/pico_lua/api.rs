@@ -106,6 +106,23 @@ fn get_color(state: &mut PicoState, args: &[Value], i: usize) -> u8 {
     c & 0x0F
 }
 
+// `circfill`/`rectfill`/`ovalfill`'s "invert" fill mode: bits 11+12
+// (0x1800) of the RAW color argument (never persisted to the one-byte
+// 0x5F25 color register, which can't hold them) request it, but only take
+// effect when 0x5F34 bit 1 is ALSO set -- oracle-confirmed neither bit
+// alone does anything (0x0800 alone and 0x1000 alone both no-op; only
+// 0x1800 together flips it), and the register bit alone (with a plain
+// low-byte color) is equally inert. Same combined gate for all three
+// shapes -- confirmed gate-off no-ops the invert bits for rectfill and
+// ovalfill too, not just circfill.
+fn color_arg_requests_invert(state: &mut PicoState, args: &[Value], i: usize) -> bool {
+    if i >= args.len() {
+        return false;
+    }
+    let raw = arg_int(args, i).unwrap_or(0);
+    (raw & 0x1800) == 0x1800 && state.memory.ram[0x5F34] & 0x2 != 0
+}
+
 // === Native function registration ===
 
 pub fn register_all(globals: &Rc<Table>) {
@@ -305,6 +322,13 @@ fn lua_tostring(i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError>
             return Ok(vec![str_v(
                 format!("thread: 0x{:x}", Rc::as_ptr(t) as usize).as_bytes(),
             )]);
+        }
+        if let Some(mm) = Interp::metamethod(&v, b"__tostring") {
+            let mut r = i.call_value(&mm, vec![v.clone()])?;
+            let result = r.drain(..).next().unwrap_or(Value::Nil);
+            if matches!(result, Value::Str(_)) {
+                return Ok(vec![result]);
+            }
         }
     }
     let s = match &v {
@@ -785,9 +809,18 @@ fn api_rotr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 
 // === String ===
 
-fn display_string(i: &Interp, v: &Value) -> String {
+fn display_string(i: &mut Interp, v: &Value) -> String {
     if is_coroutine(i, v) {
         return "[thread]".to_string();
+    }
+    if matches!(v, Value::Table(_)) {
+        if let Some(mm) = Interp::metamethod(v, b"__tostring") {
+            if let Ok(mut r) = i.call_value(&mm, vec![v.clone()]) {
+                if let Some(Value::Str(s)) = r.drain(..).next() {
+                    return String::from_utf8_lossy(&s).into_owned();
+                }
+            }
+        }
     }
     match v {
         Value::Nil => "[nil]".to_string(),
@@ -1440,6 +1473,7 @@ fn api_rect(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 fn api_rectfill(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let col = get_color(i.host(), &a, 4);
+    let invert = color_arg_requests_invert(i.host(), &a, 4);
     gfx::rectfill(
         &mut i.host().memory,
         arg_int(&a, 0).unwrap_or(0),
@@ -1447,6 +1481,7 @@ fn api_rectfill(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         arg_int(&a, 2).unwrap_or(0),
         arg_int(&a, 3).unwrap_or(0),
         col,
+        invert,
     );
     Ok(vec![])
 }
@@ -1463,12 +1498,14 @@ fn api_circ(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 fn api_circfill(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let col = get_color(i.host(), &a, 3);
+    let invert = color_arg_requests_invert(i.host(), &a, 3);
     gfx::circfill(
         &mut i.host().memory,
         arg_int(&a, 0).unwrap_or(0),
         arg_int(&a, 1).unwrap_or(0),
         opt_int(&a, 2, 4),
         col,
+        invert,
     );
     Ok(vec![])
 }
@@ -1486,6 +1523,7 @@ fn api_oval(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 fn api_ovalfill(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let col = get_color(i.host(), &a, 4);
+    let invert = color_arg_requests_invert(i.host(), &a, 4);
     gfx::ovalfill(
         &mut i.host().memory,
         arg_int(&a, 0).unwrap_or(0),
@@ -1493,6 +1531,7 @@ fn api_ovalfill(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         arg_int(&a, 2).unwrap_or(0),
         arg_int(&a, 3).unwrap_or(0),
         col,
+        invert,
     );
     Ok(vec![])
 }

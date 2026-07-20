@@ -90,6 +90,36 @@ pub fn put_pixel_no_cam(memory: &mut Memory, sx: i32, sy: i32, col: u8) {
     memory.screen_set((sx as u32 & 0x7F) as u8, (sy as u32 & 0x7F) as u8, mapped);
 }
 
+/// Same fillp/palette pipeline as `put_pixel_raw`, but never consults
+/// `clip()` -- circfill/rectfill/ovalfill's "invert" fill mode is
+/// oracle-confirmed to always cover the full 128x128 screen regardless of
+/// the active clip rect (a clipped and unclipped invert-fill of the same
+/// shape produce bit-identical screens).
+fn put_pixel_ignore_clip(memory: &mut Memory, sx: i32, sy: i32, col: u8) {
+    if !(0..128).contains(&sx) || !(0..128).contains(&sy) {
+        return;
+    }
+    let pat = get_fill_pattern(memory);
+    if pat != 0 {
+        let px = sx as u32 & 3;
+        let py = sy as u32 & 3;
+        let bit_idx = 15 - (py * 4 + px);
+        if pat & (1 << bit_idx) != 0 {
+            let fill_trans = memory.ram[memory::ADDR_FILL_PAT as usize + 2];
+            if fill_trans & 0x1 != 0 {
+                return;
+            }
+            let color_byte = memory.ram[memory::ADDR_COLOR as usize];
+            let secondary = color_byte >> 4;
+            let mapped = get_draw_pal(memory, secondary);
+            memory.screen_set((sx as u32 & 0x7F) as u8, (sy as u32 & 0x7F) as u8, mapped);
+            return;
+        }
+    }
+    let mapped = get_draw_pal(memory, col);
+    memory.screen_set((sx as u32 & 0x7F) as u8, (sy as u32 & 0x7F) as u8, mapped);
+}
+
 pub fn render_to_argb(memory: &Memory, pixel_buffer: &mut [u32; SCREEN_W * SCREEN_H]) {
     let mode = memory.ram[0x5F2C];
     for y in 0..128usize {
@@ -161,12 +191,43 @@ pub fn rect(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8) {
     draw_line(memory, x0, y1, x0, y0, col);
 }
 
-pub fn rectfill(memory: &mut Memory, mut x0: i32, mut y0: i32, mut x1: i32, mut y1: i32, col: u8) {
+#[allow(clippy::too_many_arguments)]
+pub fn rectfill(
+    memory: &mut Memory,
+    mut x0: i32,
+    mut y0: i32,
+    mut x1: i32,
+    mut y1: i32,
+    col: u8,
+    invert: bool,
+) {
     if x0 > x1 {
         core::mem::swap(&mut x0, &mut x1);
     }
     if y0 > y1 {
         core::mem::swap(&mut y0, &mut y1);
+    }
+    if invert {
+        // Fill everything on the 128x128 screen OUTSIDE [x0,x1]x[y0,y1] --
+        // same "invert" semantics as circfill's, and confirmed to likewise
+        // bypass clip() entirely.
+        let (cam_x, cam_y) = get_camera(memory);
+        let (ax0, ay0, ax1, ay1) = (x0 - cam_x, y0 - cam_y, x1 - cam_x, y1 - cam_y);
+        for sy in 0..128 {
+            if sy < ay0 || sy > ay1 {
+                for sx in 0..128 {
+                    put_pixel_ignore_clip(memory, sx, sy, col);
+                }
+            } else {
+                for sx in 0..ax0 {
+                    put_pixel_ignore_clip(memory, sx, sy, col);
+                }
+                for sx in (ax1 + 1)..128 {
+                    put_pixel_ignore_clip(memory, sx, sy, col);
+                }
+            }
+        }
+        return;
     }
     let mut y = y0;
     while y <= y1 {
@@ -180,21 +241,21 @@ pub fn rectfill(memory: &mut Memory, mut x0: i32, mut y0: i32, mut x1: i32, mut 
 }
 
 pub fn circ(memory: &mut Memory, cx: i32, cy: i32, r: i32, col: u8) {
-    draw_circ(memory, cx, cy, r, col, false);
+    draw_circ(memory, cx, cy, r, col, false, false);
 }
 
-pub fn circfill(memory: &mut Memory, cx: i32, cy: i32, r: i32, col: u8) {
-    draw_circ(memory, cx, cy, r, col, true);
+pub fn circfill(memory: &mut Memory, cx: i32, cy: i32, r: i32, col: u8, invert: bool) {
+    draw_circ(memory, cx, cy, r, col, true, invert);
 }
 
-fn draw_circ(memory: &mut Memory, cx: i32, cy: i32, r: i32, col: u8, fill: bool) {
+fn draw_circ(memory: &mut Memory, cx: i32, cy: i32, r: i32, col: u8, fill: bool, invert: bool) {
     if r < 0 {
         return;
     }
     let (cam_x, cam_y) = get_camera(memory);
     let acx = cx - cam_x;
     let acy = cy - cam_y;
-    let invert = fill && (memory.ram[0x5F34] & 0x2 != 0);
+    let invert = fill && invert;
 
     if r == 0 {
         if invert {
@@ -237,6 +298,31 @@ fn draw_circ(memory: &mut Memory, cx: i32, cy: i32, r: i32, col: u8, fill: bool)
     }
 }
 
+/// Per-row half-width of the same midpoint circle `draw_circ` rasterizes,
+/// keyed by |dy| from the center -- used so invert-fill's "outside the
+/// circle" complement lines up pixel-for-pixel with the boundary the
+/// normal (non-invert) fill would have drawn, rather than an independent
+/// sqrt-based approximation that can disagree with the Bresenham walk at
+/// the edge.
+fn circ_row_half_widths(r: i32) -> Vec<i32> {
+    let mut widths = vec![-1i32; (r + 1) as usize];
+    let mut x: i32 = r;
+    let mut y: i32 = 0;
+    let mut d: i32 = 1 - r;
+    while x >= y {
+        widths[y as usize] = widths[y as usize].max(x);
+        widths[x as usize] = widths[x as usize].max(y);
+        y += 1;
+        if d < 0 {
+            d += 2 * y + 1;
+        } else {
+            x -= 1;
+            d += 2 * (y - x) + 1;
+        }
+    }
+    widths
+}
+
 fn hline(memory: &mut Memory, x0: i32, x1: i32, y: i32, col: u8) {
     let mut sx = x0;
     while sx <= x1 {
@@ -246,38 +332,67 @@ fn hline(memory: &mut Memory, x0: i32, x1: i32, y: i32, col: u8) {
 }
 
 fn invert_fill_circ(memory: &mut Memory, cx: i32, cy: i32, r: i32, col: u8) {
-    let (x0, y0, x1, y1) = get_clip(memory);
-    let mut sy = y0;
-    while sy < y1 {
-        let dy = sy - cy;
-        if dy < -r || dy > r {
-            hline(memory, x0, x1 - 1, sy, col);
-        } else {
-            let dy2 = dy * dy;
-            let r2 = r * r;
-            let dx = ((r2 - dy2) as f64).sqrt() as i32;
-            let left = cx - dx;
-            let right = cx + dx;
-            if x0 < left {
-                hline(memory, x0, left - 1, sy, col);
+    // Fills the full 128x128 screen outside the circle -- ignores clip()
+    // entirely (oracle-confirmed: a clipped and unclipped invert-fill of
+    // the same circle produce bit-identical screens). Uses the exact same
+    // per-row half-width as the Bresenham walk `draw_circ` itself uses for
+    // a normal fill, so the boundary row lines up pixel-for-pixel instead
+    // of drifting from an independent sqrt-based circle formula.
+    let widths = circ_row_half_widths(r);
+    for sy in 0..128 {
+        let dy = (sy - cy).abs();
+        let half = if dy <= r { widths[dy as usize] } else { -1 };
+        if half < 0 {
+            for sx in 0..128 {
+                put_pixel_ignore_clip(memory, sx, sy, col);
             }
-            if right + 1 < x1 {
-                hline(memory, right + 1, x1 - 1, sy, col);
+        } else {
+            let left = cx - half;
+            let right = cx + half;
+            for sx in 0..left {
+                put_pixel_ignore_clip(memory, sx, sy, col);
+            }
+            for sx in (right + 1)..128 {
+                put_pixel_ignore_clip(memory, sx, sy, col);
             }
         }
-        sy += 1;
     }
 }
 
 pub fn oval(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8) {
-    draw_oval(memory, x0, y0, x1, y1, col, false);
+    draw_oval(memory, x0, y0, x1, y1, col, false, false);
 }
 
-pub fn ovalfill(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8) {
-    draw_oval(memory, x0, y0, x1, y1, col, true);
+pub fn ovalfill(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8, invert: bool) {
+    draw_oval(memory, x0, y0, x1, y1, col, true, invert);
 }
 
-fn draw_oval(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8, fill: bool) {
+#[allow(clippy::too_many_arguments)]
+fn draw_oval(
+    memory: &mut Memory,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    col: u8,
+    fill: bool,
+    invert: bool,
+) {
+    let invert = fill && invert;
+    // Invert mode fills the full 128x128 screen OUTSIDE the oval, ignoring
+    // clip() entirely -- same semantics as circfill/rectfill's invert.
+    // Collected as one [left,right] span per screen row (rows with no
+    // span are entirely outside the oval), then the complement of each
+    // span is filled after the normal walk below records them.
+    let mut invert_spans: [Option<(i32, i32)>; 128] = [None; 128];
+    let record_span = |spans: &mut [Option<(i32, i32)>; 128], y: i32, xa: i32, xb: i32| {
+        if (0..128).contains(&y) {
+            spans[y as usize] = Some(match spans[y as usize] {
+                Some((la, lb)) => (la.min(xa), lb.max(xb)),
+                None => (xa, xb),
+            });
+        }
+    };
     // Exact port of the official rasterizer (reverse-engineered from the
     // PICO-8 binary's draw_oval/draw_filloval + draw_ellipse_1 /
     // fill_ellipse_1): an integer midpoint walk of the quarter arc from
@@ -297,6 +412,23 @@ fn draw_oval(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8, f
         // Degenerate boxes (thinner than 3px either way) are drawn as
         // FILLED rects by both oval() and ovalfill() -- matches the
         // official hline fallback path.
+        if invert {
+            for sy in 0..128 {
+                if sy < y0 || sy > y1 {
+                    for sx in 0..128 {
+                        put_pixel_ignore_clip(memory, sx, sy, col);
+                    }
+                } else {
+                    for sx in 0..x0 {
+                        put_pixel_ignore_clip(memory, sx, sy, col);
+                    }
+                    for sx in (x1 + 1)..128 {
+                        put_pixel_ignore_clip(memory, sx, sy, col);
+                    }
+                }
+            }
+            return;
+        }
         for yy in y0..=y1 {
             for xx in x0..=x1 {
                 put_pixel_raw(memory, xx, yy, col);
@@ -348,7 +480,12 @@ fn draw_oval(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8, f
         if x * bb + err > thr_x && y * aa + err > thr_y {
             // About to move down a row: the fill emits this row's spans
             // now, using the current (maximal) x for the row.
-            if fill {
+            if fill && invert {
+                record_span(&mut invert_spans, cy - yi, cx - xi, cx + px + xi);
+                if y_mirror {
+                    record_span(&mut invert_spans, cy + py + yi, cx - xi, cx + px + xi);
+                }
+            } else if fill {
                 hline(memory, cx - xi, cx + px + xi, cy - yi);
                 if y_mirror {
                     hline(memory, cx - xi, cx + px + xi, cy + py + yi);
@@ -372,6 +509,25 @@ fn draw_oval(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8, f
         }
         if y < 0 || x > a {
             break;
+        }
+    }
+    if invert {
+        for (sy, span) in invert_spans.iter().enumerate() {
+            match span {
+                None => {
+                    for sx in 0..128 {
+                        put_pixel_ignore_clip(memory, sx, sy as i32, col);
+                    }
+                }
+                Some((l, r)) => {
+                    for sx in 0..*l {
+                        put_pixel_ignore_clip(memory, sx, sy as i32, col);
+                    }
+                    for sx in (*r + 1)..128 {
+                        put_pixel_ignore_clip(memory, sx, sy as i32, col);
+                    }
+                }
+            }
         }
     }
 }
@@ -542,7 +698,9 @@ pub fn tline(
                 let ty = (cell / 16) * 8 + ((my >> 13) & 7);
                 let col = memory.sprite_get(tx as u8, ty as u8);
                 if !is_transparent(memory, col) {
-                    put_pixel_raw(memory, (xf >> 16) as i32, (yf >> 16) as i32, col);
+                    // fillp() doesn't dither tline() either -- see
+                    // draw_sprite's comment.
+                    put_pixel_no_cam(memory, (xf >> 16) as i32, (yf >> 16) as i32, col);
                 }
             }
         }
@@ -595,7 +753,15 @@ pub fn draw_sprite(
             if is_transparent(memory, col) {
                 continue;
             }
-            put_pixel_raw(memory, dx + px - cam_x, dy + py - cam_y, col);
+            // Confirmed against official PICO-8: fillp() never dithers
+            // spr()/sspr()/map()/tline() draws (an active fill pattern
+            // during any of them produces a bit-identical screen hash to
+            // no fillp at all, oracle-locked across plain, secondary-color,
+            // and per-pixel-transparent pattern encodings) -- contrary to
+            // the manual's documented "apply" bit. `put_pixel_no_cam` is
+            // the same clip/palette pipeline as `put_pixel_raw` minus the
+            // fill-pattern step.
+            put_pixel_no_cam(memory, dx + px - cam_x, dy + py - cam_y, col);
         }
     }
 }
@@ -684,7 +850,8 @@ pub fn sspr(
             if is_transparent(memory, col) {
                 continue;
             }
-            put_pixel_raw(memory, dx + px - cam_x, dy + py - cam_y, col);
+            // fillp() doesn't dither sspr() -- see draw_sprite's comment.
+            put_pixel_no_cam(memory, dx + px - cam_x, dy + py - cam_y, col);
         }
     }
 }

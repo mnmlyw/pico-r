@@ -510,6 +510,26 @@ impl Interp {
                     self.globals.borrow_mut().set(k, v);
                     return Ok(());
                 }
+                // `__newindex` only fires when the key is absent from the
+                // table's OWN (raw) storage -- an existing key, even one
+                // set to a falsy value, always writes straight through.
+                if matches!(tbl.borrow().get(&k), Value::Nil) {
+                    let mt = tbl.borrow().metatable.clone();
+                    if let Some(mt) = mt {
+                        let ni_key = Value::Str(Rc::from(b"__newindex".as_slice()));
+                        let ni = mt.borrow().get(&ni_key);
+                        match ni {
+                            Value::Function(_) => {
+                                self.call_value(&ni, vec![t.clone(), k, v])?;
+                                return Ok(());
+                            }
+                            Value::Table(_) => {
+                                return self.table_set(&ni, k, v);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 tbl.borrow_mut().set(k, v);
                 Ok(())
             }
@@ -722,7 +742,7 @@ impl Interp {
         }
     }
 
-    fn metamethod(v: &Value, name: &[u8]) -> Option<Value> {
+    pub fn metamethod(v: &Value, name: &[u8]) -> Option<Value> {
         let Value::Table(t) = v else {
             return None;
         };
@@ -776,7 +796,23 @@ impl Interp {
                 Ok(Value::Number(quantize(match op {
                     Add => x + y,
                     Sub => x - y,
-                    Mul => x * y,
+                    // NOT `x * y` re-quantized from the real product --
+                    // confirmed via z8lua's fix32::operator* (same reference
+                    // as the `%` fix below): official PICO-8 multiplies the
+                    // two raw 16.16 bit patterns as a 64-bit integer product
+                    // and shifts right 16 (an ARITHMETIC/floor shift), not
+                    // a truncating divide by 65536. The two only diverge
+                    // when the product is negative and has a nonzero
+                    // fractional remainder, where floor rounds down (more
+                    // negative) but truncate-toward-zero rounds up (less
+                    // negative) -- oracle-confirmed: `-3.14159*2.71828`
+                    // raw-decimal is -559658, not the -559657 that
+                    // truncating the real product gives.
+                    Mul => {
+                        let fx = to_fixed(x) as i64;
+                        let fy = to_fixed(y) as i64;
+                        return Ok(Value::Number(from_fixed(((fx * fy) >> 16) as i32)));
+                    }
                     Div => {
                         // PICO-8's 16.16 fixed point has no infinity/NaN;
                         // division by zero saturates to the max/min
@@ -832,21 +868,43 @@ impl Interp {
                 out.extend_from_slice(&sb);
                 Ok(Value::Str(Rc::from(out.as_slice())))
             }
-            Eq => Ok(Value::Bool(self.values_equal(&a, &b))),
-            NotEq => Ok(Value::Bool(!self.values_equal(&a, &b))),
-            Lt => self.compare(&a, &b, |x, y| x < y, |sa, sb| sa < sb),
-            Le => self.compare(&a, &b, |x, y| x <= y, |sa, sb| sa <= sb),
-            Gt => self.compare(&a, &b, |x, y| x > y, |sa, sb| sa > sb),
-            Ge => self.compare(&a, &b, |x, y| x >= y, |sa, sb| sa >= sb),
+            Eq => Ok(Value::Bool(self.values_equal(&a, &b)?)),
+            NotEq => Ok(Value::Bool(!self.values_equal(&a, &b)?)),
+            Lt => self.compare(&a, &b, |x, y| x < y, |sa, sb| sa < sb, b"__lt", false),
+            Le => self.compare(&a, &b, |x, y| x <= y, |sa, sb| sa <= sb, b"__le", false),
+            Gt => self.compare(&a, &b, |x, y| x > y, |sa, sb| sa > sb, b"__lt", true),
+            Ge => self.compare(&a, &b, |x, y| x >= y, |sa, sb| sa >= sb, b"__le", true),
             And | Or => unreachable!(),
         }
     }
 
-    fn values_equal(&self, a: &Value, b: &Value) -> bool {
-        a.raw_equal(b)
+    fn values_equal(&mut self, a: &Value, b: &Value) -> Result<bool, RtError> {
+        if a.raw_equal(b) {
+            return Ok(true);
+        }
+        // `__eq` is only consulted when both operands are tables (Lua 5.2:
+        // same primitive type, neither already raw-equal) -- tries `a`'s
+        // metamethod first, then `b`'s, same order as the arithmetic ones.
+        if matches!(a, Value::Table(_)) && matches!(b, Value::Table(_)) {
+            if let Some(mm) = Self::metamethod(a, b"__eq").or_else(|| Self::metamethod(b, b"__eq"))
+            {
+                let mut r = self.call_value(&mm, vec![a.clone(), b.clone()])?;
+                return Ok(r.drain(..).next().unwrap_or(Value::Nil).truthy());
+            }
+        }
+        Ok(false)
     }
 
-    fn compare<F, G>(&self, a: &Value, b: &Value, fnum: F, fstr: G) -> Result<Value, RtError>
+    #[allow(clippy::too_many_arguments)]
+    fn compare<F, G>(
+        &mut self,
+        a: &Value,
+        b: &Value,
+        fnum: F,
+        fstr: G,
+        mm_name: &[u8],
+        swap: bool,
+    ) -> Result<Value, RtError>
     where
         F: Fn(f64, f64) -> bool,
         G: Fn(&[u8], &[u8]) -> bool,
@@ -854,6 +912,25 @@ impl Interp {
         match (a, b) {
             (Value::Number(x), Value::Number(y)) => Ok(Value::Bool(fnum(*x, *y))),
             (Value::Str(x), Value::Str(y)) => Ok(Value::Bool(fstr(x, y))),
+            // `a>b`/`a>=b` are defined as `b<a`/`b<=a` -- the metamethod
+            // (and its argument order) comes from whichever side of the
+            // ORIGINAL, un-swapped operator has one, per Lua semantics.
+            _ if matches!(a, Value::Table(_)) || matches!(b, Value::Table(_)) => {
+                let (ma, mb) = if swap { (b, a) } else { (a, b) };
+                if let Some(mm) =
+                    Self::metamethod(a, mm_name).or_else(|| Self::metamethod(b, mm_name))
+                {
+                    let mut r = self.call_value(&mm, vec![ma.clone(), mb.clone()])?;
+                    return Ok(Value::Bool(
+                        r.drain(..).next().unwrap_or(Value::Nil).truthy(),
+                    ));
+                }
+                Err(RtError::msg(format!(
+                    "compare {} with {}",
+                    a.type_name(),
+                    b.type_name()
+                )))
+            }
             // Lua semantics: nil compared with anything via < <= > >= is an error,
             // but the cart may rely on missing fields defaulting to 0 in some places.
             // For now, raise — this surfaces missing-field bugs in the cart.
@@ -885,11 +962,19 @@ impl Interp {
                 Err(RtError::msg("negate non-number"))
             }
             UnOp::Not => Ok(Value::Bool(!v.truthy())),
-            UnOp::Len => match v {
-                Value::Str(s) => Ok(Value::Number(s.len() as f64)),
-                Value::Table(t) => Ok(Value::Number(t.borrow().raw_len() as f64)),
-                _ => Err(RtError::msg(format!("# on {}", v.type_name()))),
-            },
+            UnOp::Len => {
+                if matches!(v, Value::Table(_)) {
+                    if let Some(mm) = Self::metamethod(&v, b"__len") {
+                        let mut r = self.call_value(&mm, vec![v])?;
+                        return Ok(r.drain(..).next().unwrap_or(Value::Nil));
+                    }
+                }
+                match v {
+                    Value::Str(s) => Ok(Value::Number(s.len() as f64)),
+                    Value::Table(t) => Ok(Value::Number(t.borrow().raw_len() as f64)),
+                    _ => Err(RtError::msg(format!("# on {}", v.type_name()))),
+                }
+            }
         }
     }
 

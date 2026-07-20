@@ -148,6 +148,22 @@ impl LuaEngine for LuaImpl {
         self.interp.host = state as *mut PicoState;
         self.error = None;
 
+        // Confirmed against official PICO-8: `t()`/`time()` already read
+        // one frame's worth of elapsed time on the VERY FIRST call inside
+        // `_init` -- before any `_update`/`_draw` cycle or explicit
+        // flip() call has happened -- and the same +1 offset shows up in
+        // an old-style cart with no _init/_update/_draw at all (its whole
+        // "game" is top-level code with explicit flip() calls): by the
+        // time its first flip()-driven t() read happens, elapsed time is
+        // already one tick ahead of what the explicit flip() calls alone
+        // would give. Both point to a single implicit tick applied once,
+        // before the top-level chunk runs at all -- fixed at 1/30
+        // (not fps-dependent) since target fps (whether the cart defines
+        // `_update60`) isn't determined until AFTER this chunk runs and
+        // `detect_lifecycle` below inspects what it defined.
+        state.frame_count += 1;
+        state.elapsed_time += 1.0 / 30.0;
+
         // Top-level block: wrap in a Lua function so `return` works at chunk level
         // and varargs are bound to the top frame as empty.
         self.interp.frames.push(interp::Frame {

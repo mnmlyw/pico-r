@@ -1,6 +1,6 @@
+RESULT spr_no_fillp 6545
 RESULT spr_plain_fillp 6545
 RESULT spr_apply_bit_fillp 6545
-RESULT spr_no_fillp 6545
 RESULT sspr_plain_fillp 3397
 RESULT map_plain_fillp 142
 RESULT tline_plain_fillp 7393
