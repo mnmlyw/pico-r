@@ -73,6 +73,19 @@ impl Memory {
         // this, the custom-map-region path saw base 0 and redirected
         // mget/mset into the sprite sheet on a fresh cart.
         m.ram[0x5F56] = 0x20;
+        // Music pattern channel bytes default to "disabled" (0x40 per
+        // channel), not zero -- a raw 0x00 byte is itself a MEANINGFUL
+        // authored value (channel enabled, playing sfx 0), so a genuinely
+        // unauthored pattern needs an explicit disabled default, the same
+        // reasoning as ADDR_MAP_WIDTH/0x5F56 above. Without this, an
+        // untouched cart's music(0) plays sfx 0 on every channel instead
+        // of being the inert no-op official gives for a blank pattern.
+        for p in 0..64usize {
+            let base = ADDR_MUSIC as usize + p * 4;
+            for ch in 0..4 {
+                m.ram[base + ch] = 0x40;
+            }
+        }
         m
     }
 

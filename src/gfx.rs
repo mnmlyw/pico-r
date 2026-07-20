@@ -633,7 +633,11 @@ pub fn sspr(
     if dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 {
         return;
     }
-    if sw > 256 || sh > 256 {
+    // No-op once the source rect exceeds the sprite sheet's own 128px
+    // dimension -- oracle-confirmed the real threshold is 128, not 256
+    // (sw=128 draws normally; sw=129 already no-ops, well below where
+    // this used to guard).
+    if sw > 128 || sh > 128 {
         return;
     }
     let (cam_x, cam_y) = get_camera(memory);
@@ -827,7 +831,13 @@ fn parse_hex_color(c: u8) -> u8 {
     }
 }
 
-pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, col: u8) -> i32 {
+pub fn draw_text(
+    memory: &mut Memory,
+    text: &[u8],
+    start_x: i32,
+    start_y: i32,
+    col: u8,
+) -> (i32, i32, i32) {
     let (cam_x, cam_y) = get_camera(memory);
     let mut x = start_x - cam_x;
     let mut y = start_y - cam_y;
@@ -856,9 +866,19 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
     // in px_p8scii_modes ("a\vfb\vfc").
     let mut anchor_x = x;
     let mut anchor_y = y;
+    // High-water mark of char_h across the whole call -- the caller's
+    // FINAL end-of-print cursor-y advance (api_print) uses whichever
+    // tall/pinball mode was EVER active during this string, even if
+    // explicitly turned back off before the string ends. Embedded `\n`
+    // (0x0A) advances use the live char_h at that exact moment instead
+    // (unchanged) -- oracle-locked: `print("\^ta\^-ta\nb")` advances the
+    // embedded newline by 6 (tall already off) but the final advance by
+    // 12 (tall was active earlier in the same call), 18 total.
+    let mut max_char_h = char_h;
     while i < text.len() {
         let ch = text[i];
         i += 1;
+        max_char_h = max_char_h.max(char_h);
         match ch {
             0x01 => {
                 if i + 1 < text.len() {
@@ -1131,7 +1151,8 @@ pub fn draw_text(memory: &mut Memory, text: &[u8], start_x: i32, start_y: i32, c
         // after "hello", not after "b").
         max_x = max_x.max(x);
     }
-    max_x + cam_x
+    max_char_h = max_char_h.max(char_h);
+    (max_x + cam_x, y + cam_y, max_char_h)
 }
 
 // Wide P8SCII glyphs (0x80-0xff) always advance the cursor by a fixed 8px
@@ -1229,17 +1250,4 @@ fn draw_styled_char(
             }
         }
     }
-}
-
-pub fn print_text_default(state: &mut PicoState, text: &[u8]) -> i32 {
-    let cx = state.memory.ram[memory::ADDR_CURSOR_X as usize] as i32;
-    let cy = state.memory.ram[memory::ADDR_CURSOR_Y as usize] as i32;
-    let col = state.memory.ram[memory::ADDR_COLOR as usize] & 0x0F;
-    let right = draw_text(&mut state.memory, text, cx, cy, col);
-    state.memory.ram[memory::ADDR_CURSOR_Y as usize] = ((cy + 6) & 0xFF) as u8;
-    right
-}
-
-pub fn print_text_at(memory: &mut Memory, text: &[u8], x: i32, y: i32, col: u8) -> i32 {
-    draw_text(memory, text, x, y, col)
 }

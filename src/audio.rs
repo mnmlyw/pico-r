@@ -58,6 +58,12 @@ pub struct Channel {
     pub prev_pitch: u8,
     pub prev_vol: u8,
     pub loop_released: bool,
+    // sfx(id,-2) reports the channel as stopped via stat() IMMEDIATELY
+    // (oracle-confirmed) while the channel's audio keeps playing out its
+    // current pass without looping back -- distinct from `loop_released`,
+    // which drives that sample-generation behavior but doesn't affect
+    // what stat() reports.
+    pub reported_stopped: bool,
 }
 
 impl Default for Channel {
@@ -92,6 +98,7 @@ impl Channel {
             prev_pitch: 0,
             prev_vol: 0,
             loop_released: false,
+            reported_stopped: false,
         }
     }
 }
@@ -170,14 +177,15 @@ impl Audio {
 
     pub fn play_sfx(&mut self, memory: &Memory, sfx_id: i32, channel_req: i32, offset: i32) {
         if sfx_id == -1 {
+            // sfx(-1) (any channel form) stops SFX channels only -- it
+            // must NOT touch music(), oracle-confirmed: stat(24) (music
+            // pattern) is unaffected by either `sfx(-1)` or `sfx(-1,ch)`.
             if channel_req >= 0 && (channel_req as usize) < NUM_CHANNELS {
                 self.stop_channel(channel_req as usize);
             } else {
                 for i in 0..NUM_CHANNELS {
                     self.stop_channel(i);
                 }
-                self.music_state.pattern = -1;
-                self.music_state.playing = false;
             }
             return;
         }
@@ -196,13 +204,16 @@ impl Audio {
         }
 
         // sfx(N, -2): release the loop of any channel currently playing
-        // SFX N. Carts pair this with sfx(N) for fresh starts, and call
-        // sfx(N, -2) alone to STOP a loop without starting a new one. Without
-        // this the sound loops forever (e.g. mansion_bros' vacuum SFX).
+        // SFX N so it finishes its current pass instead of looping forever
+        // -- but stat()'s per-channel sfx-id/note-index report that
+        // channel as stopped (-1) IMMEDIATELY, oracle-confirmed, even
+        // though the sample generation keeps that channel audible until
+        // its current pass naturally ends.
         if channel_req == -2 {
             for i in 0..NUM_CHANNELS {
                 if self.channels[i].sfx_id as i32 == sfx_id {
                     self.release_loop(i);
+                    self.channels[i].reported_stopped = true;
                 }
             }
             return;
@@ -260,6 +271,17 @@ impl Audio {
             return;
         }
         if pattern >= 64 {
+            return;
+        }
+        // A pattern whose 4 channel bytes are ALL "disabled" (0x40 bit
+        // set) is unauthored/blank -- official treats music() targeting
+        // it as a complete no-op (stat(24) stays -1, stat(57) stays
+        // false), not "playing an empty pattern". Checked against the
+        // pattern's own raw bytes, NOT the channel_mask argument: an
+        // explicit mask of 0 on a REAL authored pattern is a deliberate,
+        // different feature (track position without owning channels).
+        let base = memory::ADDR_MUSIC as usize + pattern as usize * 4;
+        if (0..4).all(|ch| memory.ram[base + ch] & 0x40 != 0) {
             return;
         }
         self.music_state = MusicState {

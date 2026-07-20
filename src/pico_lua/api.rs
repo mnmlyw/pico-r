@@ -1659,16 +1659,18 @@ fn api_print(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         }
         k += 1;
     }
-    let r = gfx::draw_text(&mut st.memory, &txt, x, y, col);
+    let (r, end_y, max_char_h) = gfx::draw_text(&mut st.memory, &txt, x, y, col);
     // Confirmed against official PICO-8: print() always persists the
     // cursor registers afterward, regardless of which argument form was
     // used -- cursor_x resets to this call's starting x (not wherever the
-    // text ended up), and cursor_y advances by 6 PER LINE printed (not a
-    // flat +6), both confirmed via a "hello\nb" probe (cx stayed at
-    // start_x=20, cy became start_y+12 for its 2 lines, not +6).
-    let num_lines = 1 + txt.iter().filter(|&&b| b == b'\n').count() as i32;
+    // text ended up); cursor_y ends up at wherever embedded `\n`s advanced
+    // it (each using whatever tall/pinball mode was live AT THAT MOMENT)
+    // PLUS one more line using the HIGH-WATER-MARK char_h ever active
+    // during the call (even if a mode was explicitly turned back off
+    // before the string ended) -- oracle-locked against
+    // cursor-y-newline-advance-ignores-live-char-h's four cases.
     st.memory.ram[mem::ADDR_CURSOR_X as usize] = (x & 0xFF) as u8;
-    st.memory.ram[mem::ADDR_CURSOR_Y as usize] = ((y + 6 * num_lines) & 0xFF) as u8;
+    st.memory.ram[mem::ADDR_CURSOR_Y as usize] = ((end_y + max_char_h) & 0xFF) as u8;
     Ok(vec![num(r as f64)])
 }
 fn api_cursor(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -2109,7 +2111,7 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         // the reverse of what these two branches previously returned.
         16..=19 => {
             let c = &st.audio.channels[(n - 16) as usize];
-            if !c.finished && c.sfx_id >= 0 {
+            if !c.finished && !c.reported_stopped && c.sfx_id >= 0 {
                 num(c.sfx_id as f64)
             } else {
                 num(-1.0)
@@ -2117,7 +2119,7 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         }
         20..=23 => {
             let c = &st.audio.channels[(n - 20) as usize];
-            if !c.finished && c.sfx_id >= 0 {
+            if !c.finished && !c.reported_stopped && c.sfx_id >= 0 {
                 num(c.note_index as f64)
             } else {
                 num(0.0)
@@ -2154,7 +2156,7 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         // is a uniform -1 sentinel across both stat ranges).
         46..=49 => {
             let c = &st.audio.channels[(n - 46) as usize];
-            if !c.finished && c.sfx_id >= 0 {
+            if !c.finished && !c.reported_stopped && c.sfx_id >= 0 {
                 num(c.sfx_id as f64)
             } else {
                 num(-1.0)
@@ -2162,7 +2164,7 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         }
         50..=53 => {
             let c = &st.audio.channels[(n - 50) as usize];
-            if !c.finished && c.sfx_id >= 0 {
+            if !c.finished && !c.reported_stopped && c.sfx_id >= 0 {
                 num(c.note_index as f64)
             } else {
                 num(-1.0)

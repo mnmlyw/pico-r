@@ -19,15 +19,10 @@ print-no-autoscroll-below-y122
 # count) cursor_y quirk whose real mechanism isn't understood -- left
 # open rather than special-cased to match by coincidence.
 audio-control-code-0x07-not-parsed
-cursor-y-newline-advance-ignores-live-char-h
 sfx-same-id-channel-dedup
-sfx-channel-neg2-releases-instead-of-stops
-sfx-neg1-no-channel-kills-music
-music-blank-pattern-not-exhausted
 cstore-filename-arg-unimplemented
 load-param-str-not-plumbed
 sspr-flip-noninteger-scale-untested
-sspr-large-source-rect-noop-guard
 pairs-hash-part-order-nondeterministic
 vararg-outside-vararg-function-no-error
 goto-forward-into-local-scope-not-rejected
