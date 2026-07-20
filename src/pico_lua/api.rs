@@ -406,14 +406,16 @@ fn lua_next(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
     };
     let prev_key = args.get(1).cloned().unwrap_or(Value::Nil);
     let table = t.borrow();
-    // Sequential positive-integer ("array part") keys are yielded first, in
-    // ascending order -- this matches real Lua/PICO-8 for the common
-    // list-like-table case and is unambiguous, unlike hash-part order (which
-    // depends on real Lua's bucket layout/rehash history and isn't worth
-    // replicating -- see tests/conformance/LEDGER.md). Remaining keys follow
-    // in whatever order the backing HashMap iterates them (non-deterministic
-    // across runs, but real Lua/PICO-8's own hash-part order isn't a fixed
-    // target either).
+    // Positive-integer ("array part") keys are yielded first, in ascending
+    // order -- oracle-locked by pairs-array-part-first-deterministic.
+    // Remaining keys follow in insertion order. Real hardware's hash-part
+    // order differs: STRING keys are genuinely random per run (verified:
+    // the same cart gives different permutations run to run -- z8lua seeds
+    // its string hash from time+ASLR), so insertion order is as good as
+    // any there; NUMERIC hash-part keys have a deterministic seedless
+    // bucket order that pico-r does NOT replicate (needs the full
+    // ltable.c node-layout port -- see the
+    // pairs-hash-part-bucket-order-numeric-keys xfail).
     let mut keys: Vec<Key> = table.map.keys().cloned().collect();
     keys.sort_by_key(|k| match k {
         Key::Int(i) if *i >= 1 => (0, *i),
@@ -1702,7 +1704,8 @@ fn api_print(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         }
         k += 1;
     }
-    let (r, end_y, max_char_h) = gfx::draw_text(&mut st.memory, &txt, x, y, col, autoscroll);
+    let (r, end_y, max_char_h, audio_suppress) =
+        gfx::draw_text(&mut st.memory, &txt, x, y, col, autoscroll);
     // Confirmed against official PICO-8: print() always persists the
     // cursor registers afterward, regardless of which argument form was
     // used -- cursor_x resets to this call's starting x (not wherever the
@@ -1713,13 +1716,20 @@ fn api_print(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     // before the string ended) -- oracle-locked against
     // cursor-y-newline-advance-ignores-live-char-h's four cases.
     st.memory.ram[mem::ADDR_CURSOR_X as usize] = (x & 0xFF) as u8;
-    let mut final_y = end_y + max_char_h;
+    // A `\a` annotation ending in a pending audio command suppresses the
+    // whole end-of-print advance (and with it the autoscroll): cursor_y
+    // lands exactly on end_y -- see the 0x07 arm in gfx::draw_text.
+    let mut final_y = if audio_suppress {
+        end_y
+    } else {
+        end_y + max_char_h
+    };
     // Same autoscroll rule as embedded `\n` (see gfx::draw_text) -- applies
     // to this call's own final advance too, oracle-confirmed via
     // print-no-autoscroll-below-y122, and gated the same way on
     // cursor-register vs explicit-xy print() forms (oracle-confirmed
     // separately: explicit-xy print() never scrolls).
-    if autoscroll && final_y > 122 {
+    if !audio_suppress && autoscroll && final_y > 122 {
         gfx::scroll_screen_up(&mut st.memory, max_char_h);
         final_y -= max_char_h;
     }

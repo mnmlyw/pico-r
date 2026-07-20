@@ -121,8 +121,187 @@ fn parse_p8_text(content: &[u8], memory: &mut Memory) -> Result<Cart, CartError>
     }
 
     Ok(Cart {
-        lua_code: lua_lines,
+        lua_code: decode_utf8_glyphs(&lua_lines),
     })
+}
+
+// P8SCII glyph decode for text-format carts: PICO-8 stores its glyph
+// characters (16-31 and 128-255) as UTF-8 in .p8 files and converts each
+// to a single P8SCII byte at load. Every entry below was confirmed
+// against the official binary (one probe per codepoint, reading back
+// #s/ord(s)): 139 codepoints map from the bare codepoint; the five
+// button/arrow glyphs (131/139/142/145/148) map ONLY from
+// codepoint+U+FE0F (the emoji variation selector PICO-8 itself writes)
+// -- bare, those five stay as raw UTF-8 bytes -- while for every other
+// entry a trailing U+FE0F is NOT consumed (it stays behind as its own
+// raw bytes). Unmatched sequences pass through untouched, so this only
+// runs for text carts (parse_p8_text); .p8.png carts store P8SCII bytes
+// natively and never hit it.
+const GLYPH_UTF8: &[(&str, u8)] = &[
+    ("\u{25AE}", 16),
+    ("\u{25A0}", 17),
+    ("\u{25A1}", 18),
+    ("\u{2059}", 19),
+    ("\u{2058}", 20),
+    ("\u{2016}", 21),
+    ("\u{25C0}", 22),
+    ("\u{25B6}", 23),
+    ("\u{300C}", 24),
+    ("\u{300D}", 25),
+    ("\u{A5}", 26),
+    ("\u{2022}", 27),
+    ("\u{3001}", 28),
+    ("\u{3002}", 29),
+    ("\u{309B}", 30),
+    ("\u{309C}", 31),
+    ("\u{2588}", 128),
+    ("\u{2592}", 129),
+    ("\u{1F431}", 130),
+    ("\u{2591}", 132),
+    ("\u{273D}", 133),
+    ("\u{25CF}", 134),
+    ("\u{2665}", 135),
+    ("\u{2609}", 136),
+    ("\u{C6C3}", 137),
+    ("\u{2302}", 138),
+    ("\u{1F610}", 140),
+    ("\u{266A}", 141),
+    ("\u{25C6}", 143),
+    ("\u{2026}", 144),
+    ("\u{2605}", 146),
+    ("\u{29D7}", 147),
+    ("\u{2C7}", 149),
+    ("\u{2227}", 150),
+    ("\u{274E}", 151),
+    ("\u{25A4}", 152),
+    ("\u{25A5}", 153),
+    ("\u{3042}", 154),
+    ("\u{3044}", 155),
+    ("\u{3046}", 156),
+    ("\u{3048}", 157),
+    ("\u{304A}", 158),
+    ("\u{304B}", 159),
+    ("\u{304D}", 160),
+    ("\u{304F}", 161),
+    ("\u{3051}", 162),
+    ("\u{3053}", 163),
+    ("\u{3055}", 164),
+    ("\u{3057}", 165),
+    ("\u{3059}", 166),
+    ("\u{305B}", 167),
+    ("\u{305D}", 168),
+    ("\u{305F}", 169),
+    ("\u{3061}", 170),
+    ("\u{3064}", 171),
+    ("\u{3066}", 172),
+    ("\u{3068}", 173),
+    ("\u{306A}", 174),
+    ("\u{306B}", 175),
+    ("\u{306C}", 176),
+    ("\u{306D}", 177),
+    ("\u{306E}", 178),
+    ("\u{306F}", 179),
+    ("\u{3072}", 180),
+    ("\u{3075}", 181),
+    ("\u{3078}", 182),
+    ("\u{307B}", 183),
+    ("\u{307E}", 184),
+    ("\u{307F}", 185),
+    ("\u{3080}", 186),
+    ("\u{3081}", 187),
+    ("\u{3082}", 188),
+    ("\u{3084}", 189),
+    ("\u{3086}", 190),
+    ("\u{3088}", 191),
+    ("\u{3089}", 192),
+    ("\u{308A}", 193),
+    ("\u{308B}", 194),
+    ("\u{308C}", 195),
+    ("\u{308D}", 196),
+    ("\u{308F}", 197),
+    ("\u{3092}", 198),
+    ("\u{3093}", 199),
+    ("\u{3063}", 200),
+    ("\u{3083}", 201),
+    ("\u{3085}", 202),
+    ("\u{3087}", 203),
+    ("\u{30A2}", 204),
+    ("\u{30A4}", 205),
+    ("\u{30A6}", 206),
+    ("\u{30A8}", 207),
+    ("\u{30AA}", 208),
+    ("\u{30AB}", 209),
+    ("\u{30AD}", 210),
+    ("\u{30AF}", 211),
+    ("\u{30B1}", 212),
+    ("\u{30B3}", 213),
+    ("\u{30B5}", 214),
+    ("\u{30B7}", 215),
+    ("\u{30B9}", 216),
+    ("\u{30BB}", 217),
+    ("\u{30BD}", 218),
+    ("\u{30BF}", 219),
+    ("\u{30C1}", 220),
+    ("\u{30C4}", 221),
+    ("\u{30C6}", 222),
+    ("\u{30C8}", 223),
+    ("\u{30CA}", 224),
+    ("\u{30CB}", 225),
+    ("\u{30CC}", 226),
+    ("\u{30CD}", 227),
+    ("\u{30CE}", 228),
+    ("\u{30CF}", 229),
+    ("\u{30D2}", 230),
+    ("\u{30D5}", 231),
+    ("\u{30D8}", 232),
+    ("\u{30DB}", 233),
+    ("\u{30DE}", 234),
+    ("\u{30DF}", 235),
+    ("\u{30E0}", 236),
+    ("\u{30E1}", 237),
+    ("\u{30E2}", 238),
+    ("\u{30E4}", 239),
+    ("\u{30E6}", 240),
+    ("\u{30E8}", 241),
+    ("\u{30E9}", 242),
+    ("\u{30EA}", 243),
+    ("\u{30EB}", 244),
+    ("\u{30EC}", 245),
+    ("\u{30ED}", 246),
+    ("\u{30EF}", 247),
+    ("\u{30F2}", 248),
+    ("\u{30F3}", 249),
+    ("\u{30C3}", 250),
+    ("\u{30E3}", 251),
+    ("\u{30E5}", 252),
+    ("\u{30E7}", 253),
+    ("\u{25DC}", 254),
+    ("\u{25DD}", 255),
+    ("\u{2B07}\u{FE0F}", 131),
+    ("\u{2B05}\u{FE0F}", 139),
+    ("\u{1F17E}\u{FE0F}", 142),
+    ("\u{27A1}\u{FE0F}", 145),
+    ("\u{2B06}\u{FE0F}", 148),
+];
+
+fn decode_utf8_glyphs(src: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(src.len());
+    let mut i = 0;
+    'outer: while i < src.len() {
+        if src[i] >= 0x80 {
+            for (seq, byte) in GLYPH_UTF8 {
+                let s = seq.as_bytes();
+                if src[i..].starts_with(s) {
+                    out.push(*byte);
+                    i += s.len();
+                    continue 'outer;
+                }
+            }
+        }
+        out.push(src[i]);
+        i += 1;
+    }
+    out
 }
 
 fn split_lines(data: &[u8]) -> impl Iterator<Item = &[u8]> {

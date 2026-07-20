@@ -852,7 +852,16 @@ impl Interp {
                             from_fixed(if r < 0 { r.wrapping_add(bx) } else { r })
                         }
                     }
-                    Pow => x.powf(y),
+                    // Official `^` is a raw-bits fixed-point algorithm
+                    // (square-and-multiply + repeated-square-root fraction
+                    // bits), not real powf re-quantized -- see fixed_pow's
+                    // comment for the oracle evidence.
+                    Pow => {
+                        return Ok(Value::Number(from_fixed(fixed_pow(
+                            to_fixed(x),
+                            to_fixed(y),
+                        ))));
+                    }
                     _ => unreachable!(),
                 })))
             }

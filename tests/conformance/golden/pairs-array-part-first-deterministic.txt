@@ -1,0 +1,7 @@
+RESULT dense_prefix 1,2,3,
+RESULT dense_set 1,2,3,name,other,
+RESULT pure_dense 1,2,3,4,
+RESULT ctor_prefix 1,2,3,
+RESULT sparse_a 1,2,3,7,9,
+RESULT sparse_b 1,2,3,7,9,
+DONE

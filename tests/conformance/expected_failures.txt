@@ -2,7 +2,6 @@
 # Discovered by an automated corpus/spec-audit sweep; each probe+golden pair
 # is real evidence of a divergence from official PICO-8, just not yet acted
 # on. Remove a line once its engine fix lands and the probe matches.
-p8scii-utf8-glyph-not-decoded
 # tostr-tostring-metamethod-ignored: the actual bug (tostring()/tostr()
 # ignoring a table's __tostring metamethod) is fixed and 3 of the golden's
 # 4 RESULT lines match byte-exact. The 4th (a plain table's default
@@ -12,16 +11,16 @@ p8scii-utf8-glyph-not-decoded
 # probe can't fully graduate regardless of correctness. Left listed rather
 # than fabricating a matching address.
 tostr-tostring-metamethod-ignored
-# audio-control-code-0x07-not-parsed: partially fixed (see LEDGER) -- \a
-# now correctly consumes the rest of the string as an audio annotation
-# instead of drawing it as literal glyphs, matching 2 of 3 golden cases.
-# The remaining mismatch is NOT simple trailing-byte-count parity as
-# first suspected -- direct oracle re-probing this round found content-
-# dependent behavior that breaks that theory too (a 3-trailing-byte
-# "c1x" suppresses the final cursor advance, but a 3-trailing-byte "xyz"
-# does not; a single trailing byte "x" suppresses, but two/three/four
-# non-hex trailing bytes don't). Left open rather than special-cased --
-# the real parsing rule for \a's parameter format still isn't understood.
-audio-control-code-0x07-not-parsed
-pairs-hash-part-order-nondeterministic
-pow-operator-uses-real-math-not-integer-exponent-quirk
+# pairs-hash-part-bucket-order-numeric-keys: NUMERIC keys in a table's
+# hash part iterate in a deterministic, seedless bucket order on real
+# hardware (verified stable across 4 spaced runs -- unlike STRING keys,
+# whose order is genuinely random per run; the old
+# pairs-hash-part-order-nondeterministic probe goldened one such random
+# draw and was deleted as invalid evidence). Reproducing bucket order
+# requires porting lua 5.2 ltable.c's node machinery (z8lua's
+# luai_hashnum on the 16.16 raw bits, mainposition/collision chains,
+# power-of-2 rehash growth history) into pico-r's core table type -- a
+# self-contained project with near-zero real-cart impact, deferred. The
+# deterministic array-part-first facts ARE implemented and locked by
+# pairs-array-part-first-deterministic.
+pairs-hash-part-bucket-order-numeric-keys

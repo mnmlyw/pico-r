@@ -1,0 +1,3 @@
+RESULT sparse_c 1,100,50,
+RESULT numkeys 0,-1,0.5,1,
+DONE

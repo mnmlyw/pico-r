@@ -40,6 +40,86 @@ pub fn quantize(v: f64) -> f64 {
     from_fixed(to_fixed(v))
 }
 
+/// Floor of the true square root, in 16.16: isqrt(raw << 16). This is
+/// official PICO-8's own sqrt() rounding (oracle-verified on a 201-point
+/// map including 0x7fff.ffff), and the primitive `^`'s fractional path
+/// is built on.
+fn fixed_sqrt(v: i32) -> i32 {
+    if v <= 0 {
+        return 0;
+    }
+    let target = (v as u64) << 16;
+    let mut x = (target as f64).sqrt() as u64;
+    while x.checked_mul(x).is_none_or(|xx| xx > target) {
+        x -= 1;
+    }
+    while (x + 1).checked_mul(x + 1).is_some_and(|xx| xx <= target) {
+        x += 1;
+    }
+    x as i32
+}
+
+/// Official PICO-8's `^` operator on raw 16.16 bit patterns -- NOT
+/// real-math pow re-quantized (z8lua master's std::pow(double) was tested
+/// against the binary and does NOT match: 9^0.9 is raw 473406 on real
+/// hardware vs ~473470 from double pow). Reverse-engineered empirically:
+/// 1747 oracle data points reproduced byte-exact, including a 400-point
+/// held-out set generated after the model was frozen, plus an 809-pair
+/// in-cart equivalence test proving `^` shares sqrt()/'*'/'/'s exact
+/// rounding (see tests/conformance/probes/pow-*.p8 and the LEDGER).
+///
+/// Structure: a negative exponent takes the reciprocal of the base FIRST
+/// (PICO-8 division: truncate toward zero, 1/0 saturates to 0x7fffffff)
+/// and negates the exponent (wrapping, so -32768 stays put and its
+/// magnitude comes out of the u16 cast below as 32768). The exponent's
+/// integer bits run LSB-first square-and-multiply with wrapping i32
+/// multiplies (2^15 wraps to raw 0x80000000, 2^16 to 0 -- oracle
+/// confirmed); the 16 fraction bits multiply in the repeated-square-root
+/// expansion of the base (sqrt^(i+1)(x) for set bit 15-i), with
+/// truncating sqrt/mul at every step -- there is no exp2/log2 pair and
+/// no lookup table. A non-positive base with any fraction bits returns 0
+/// for the ENTIRE result, even when the integer part alone would be
+/// nonzero ((-2)^2.5 == 0); the check runs on the post-reciprocal base,
+/// which is how 0^-0.5 comes out as sqrt(0x7fff.ffff).
+pub fn fixed_pow(x: i32, y: i32) -> i32 {
+    const ONE: i32 = 1 << 16;
+    let mul = |a: i32, b: i32| (((a as i64) * (b as i64)) >> 16) as i32;
+    let (x, y) = if y < 0 {
+        let recip = if x == 0 {
+            i32::MAX
+        } else {
+            (((ONE as i64) << 16) / (x as i64)) as i32
+        };
+        (recip, y.wrapping_neg())
+    } else {
+        (x, y)
+    };
+    let mut n = ((y >> 16) & 0xFFFF) as u32;
+    let f = y & 0xFFFF;
+    let mut r = ONE;
+    let mut b = x;
+    while n != 0 {
+        if n & 1 != 0 {
+            r = mul(r, b);
+        }
+        b = mul(b, b);
+        n >>= 1;
+    }
+    if f != 0 {
+        if x <= 0 {
+            return 0;
+        }
+        let mut a = x;
+        for i in (0..16).rev() {
+            a = fixed_sqrt(a);
+            if f & (1 << i) != 0 {
+                r = mul(r, a);
+            }
+        }
+    }
+    r
+}
+
 impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

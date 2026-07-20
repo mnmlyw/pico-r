@@ -1,4 +1,0 @@
-RESULT order 1,2,3,other,name,
-RESULT order2 beta,zeta,gamma,alpha,
-RESULT order3 1,2,3,
-DONE

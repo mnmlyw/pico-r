@@ -1041,7 +1041,7 @@ pub fn draw_text(
     start_y: i32,
     col: u8,
     autoscroll: bool,
-) -> (i32, i32, i32) {
+) -> (i32, i32, i32, bool) {
     let (cam_x, cam_y) = get_camera(memory);
     let mut x = start_x - cam_x;
     let mut y = start_y - cam_y;
@@ -1087,6 +1087,10 @@ pub fn draw_text(
     // embedded newline by 6 (tall already off) but the final advance by
     // 12 (tall was active earlier in the same call), 18 total.
     let mut max_char_h = char_h;
+    // Set by the `\a` (0x07) arm when the audio annotation ends with a
+    // command still awaiting its argument -- tells api_print to skip the
+    // final cursor-y advance entirely (see the 0x07 arm's comment).
+    let mut audio_suppress = false;
     while i < text.len() {
         let ch = text[i];
         i += 1;
@@ -1296,12 +1300,74 @@ pub fn draw_text(
             0x00 => break,
             // `\a` (0x07): audio-cue annotation -- everything from here to
             // the end of the STRING is the audio encoding, not visible
-            // text (oracle-confirmed: print("\ac1x") advances the cursor
-            // by zero; print("ab\acc") only "ab" contributes to the
-            // return value/cursor advance, "cc" is swallowed). Not just
-            // "this call" like 0x00 -- there's no further dispatch after
-            // it either way since it consumes the rest of `text`.
-            0x07 => break,
+            // text (oracle-confirmed: print("ab\acc") only "ab" contributes
+            // to the return value/cursor advance, "cc" is swallowed).
+            //
+            // Whether print()'s FINAL cursor-y advance still happens
+            // depends on the audio parser's state at end-of-string,
+            // reverse-engineered from ~120 oracle probes (all matching,
+            // including two 30-case held-out random validation rounds):
+            // the parse has a leading "header" phase where x/z/i/s/v are
+            // commands awaiting a numeric argument, followed by a "notes"
+            // phase (entered at the first note/junk character) where only
+            // x/i/v are commands. x/i/v take a single argument character
+            // and always exit the header once they've consumed anything
+            // (digit or junk); z/s eat a multi-digit number (a non-digit
+            // ends the number and is reprocessed) and never exit the
+            // header on their own, including when they swallow a junk
+            // argument. If the string ENDS with a command still awaiting
+            // its argument, the final advance is suppressed entirely --
+            // cursor_y lands exactly on end_y (embedded-newline advances
+            // kept; the end-of-print advance and its autoscroll skipped,
+            // oracle-confirmed even with tall mode active).
+            //
+            // Untested inputs (uppercase command letters) classify as
+            // junk. NOT modelled: several inputs (multi-digit numbers
+            // like "x12"/"s99"/"z12", long bare-digit runs "1111x", and
+            // bare "#") HANG the official binary outright -- there is no
+            // golden-able behavior there, and an emulator must terminate,
+            // so pico-r just parses them like anything else.
+            0x07 => {
+                let mut header = true;
+                let mut pending: Option<u8> = None;
+                let mut eating = false;
+                let mut k = i;
+                while k < text.len() {
+                    let c = text[k];
+                    k += 1;
+                    if let Some(cmd) = pending.take() {
+                        if c.is_ascii_digit() {
+                            if matches!(cmd, b'x' | b'i' | b'v') {
+                                header = false;
+                            } else {
+                                eating = true;
+                            }
+                        } else if matches!(cmd, b'x' | b'i' | b'v') {
+                            header = false;
+                        }
+                        continue;
+                    }
+                    if eating {
+                        if c.is_ascii_digit() {
+                            continue;
+                        }
+                        eating = false;
+                        k -= 1;
+                        continue;
+                    }
+                    if header {
+                        match c {
+                            b'x' | b'z' | b'i' | b's' | b'v' => pending = Some(c),
+                            b'0'..=b'9' => {}
+                            _ => header = false,
+                        }
+                    } else if matches!(c, b'x' | b'i' | b'v') {
+                        pending = Some(c);
+                    }
+                }
+                audio_suppress = pending.is_some();
+                break;
+            }
             0x08 => x -= char_w,
             0x09 => x = (x / tab_w) * tab_w + tab_w,
             0x0A => {
@@ -1401,7 +1467,7 @@ pub fn draw_text(
         max_x = max_x.max(x);
     }
     max_char_h = max_char_h.max(char_h);
-    (max_x + cam_x, y + cam_y, max_char_h)
+    (max_x + cam_x, y + cam_y, max_char_h, audio_suppress)
 }
 
 // Wide P8SCII glyphs (0x80-0xff) always advance the cursor by a fixed 8px
