@@ -10,6 +10,11 @@ use super::lex::{Tok, Token};
 pub struct Parser {
     toks: Vec<Token>,
     pos: usize,
+    // Vararg-ness of each enclosing function scope, innermost last. The
+    // main chunk is implicitly a vararg function in Lua 5.2 (it's
+    // compiled as `function(...) ... end`), so this starts with one
+    // `true` entry rather than empty.
+    vararg_scopes: Vec<bool>,
 }
 
 #[derive(Debug)]
@@ -20,7 +25,11 @@ pub struct ParseError {
 
 impl Parser {
     pub fn new(toks: Vec<Token>) -> Self {
-        Self { toks, pos: 0 }
+        Self {
+            toks,
+            pos: 0,
+            vararg_scopes: vec![true],
+        }
     }
 
     pub fn parse_chunk(&mut self) -> Result<Block, ParseError> {
@@ -306,7 +315,10 @@ impl Parser {
             }
         }
         self.expect(&Tok::RParen, "')'")?;
-        let body = self.parse_block()?;
+        self.vararg_scopes.push(is_vararg);
+        let body = self.parse_block();
+        self.vararg_scopes.pop();
+        let body = body?;
         self.expect(&Tok::End, "'end'")?;
         Ok(FuncBody {
             params,
@@ -487,6 +499,14 @@ impl Parser {
             }
             Tok::Vararg => {
                 self.pos += 1;
+                // Confirmed against official PICO-8: `...` inside a
+                // function that doesn't declare `...` as a parameter is a
+                // LOAD-TIME error ("cannot use '...' outside a vararg
+                // function"), not silently `nil`/empty -- the cart never
+                // starts running at all.
+                if !*self.vararg_scopes.last().unwrap_or(&true) {
+                    return Err(self.err("cannot use '...' outside a vararg function"));
+                }
                 Ok(Expr::Vararg)
             }
             Tok::Function => {

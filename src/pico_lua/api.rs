@@ -1667,21 +1667,25 @@ fn api_print(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         .and_then(|v| v.as_str())
         .unwrap_or_else(|| Rc::from(b"".as_slice()));
     let st = i.host();
-    let (x, y, col) = if a.len() <= 1 || matches!(a.get(1), Some(Value::Nil)) {
+    // Confirmed against official PICO-8: the y=122 autoscroll rule (see
+    // below) only fires for the two forms that read x/y off the cursor
+    // registers -- an EXPLICIT x/y print() never scrolls, even when
+    // embedded `\n`s push well past the bottom of the screen.
+    let (x, y, col, autoscroll) = if a.len() <= 1 || matches!(a.get(1), Some(Value::Nil)) {
         let cx = st.memory.ram[mem::ADDR_CURSOR_X as usize] as i32;
         let cy = st.memory.ram[mem::ADDR_CURSOR_Y as usize] as i32;
         let col = st.memory.ram[mem::ADDR_COLOR as usize] & 0x0F;
-        (cx, cy, col)
+        (cx, cy, col, true)
     } else if a.len() <= 2 || matches!(a.get(2), Some(Value::Nil)) {
         let cx = st.memory.ram[mem::ADDR_CURSOR_X as usize] as i32;
         let cy = st.memory.ram[mem::ADDR_CURSOR_Y as usize] as i32;
         let col = get_color(st, &a, 1);
-        (cx, cy, col)
+        (cx, cy, col, true)
     } else {
         let x = arg_int(&a, 1).unwrap_or(0);
         let y = arg_int(&a, 2).unwrap_or(0);
         let col = get_color(st, &a, 3);
-        (x, y, col)
+        (x, y, col, false)
     };
     // P8SCII `\^1`..`\^9` are frame-pause control codes -- golfed carts
     // replace their whole flip() with `?"\^1\^c"` (pause a frame + clear;
@@ -1698,7 +1702,7 @@ fn api_print(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         }
         k += 1;
     }
-    let (r, end_y, max_char_h) = gfx::draw_text(&mut st.memory, &txt, x, y, col);
+    let (r, end_y, max_char_h) = gfx::draw_text(&mut st.memory, &txt, x, y, col, autoscroll);
     // Confirmed against official PICO-8: print() always persists the
     // cursor registers afterward, regardless of which argument form was
     // used -- cursor_x resets to this call's starting x (not wherever the
@@ -1709,7 +1713,17 @@ fn api_print(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     // before the string ended) -- oracle-locked against
     // cursor-y-newline-advance-ignores-live-char-h's four cases.
     st.memory.ram[mem::ADDR_CURSOR_X as usize] = (x & 0xFF) as u8;
-    st.memory.ram[mem::ADDR_CURSOR_Y as usize] = ((end_y + max_char_h) & 0xFF) as u8;
+    let mut final_y = end_y + max_char_h;
+    // Same autoscroll rule as embedded `\n` (see gfx::draw_text) -- applies
+    // to this call's own final advance too, oracle-confirmed via
+    // print-no-autoscroll-below-y122, and gated the same way on
+    // cursor-register vs explicit-xy print() forms (oracle-confirmed
+    // separately: explicit-xy print() never scrolls).
+    if autoscroll && final_y > 122 {
+        gfx::scroll_screen_up(&mut st.memory, max_char_h);
+        final_y -= max_char_h;
+    }
+    st.memory.ram[mem::ADDR_CURSOR_Y as usize] = (final_y & 0xFF) as u8;
     Ok(vec![num(r as f64)])
 }
 fn api_cursor(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
@@ -2143,7 +2157,7 @@ fn api_stat(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         1 => num(0.5),
         4 => str_v(b""),
         5 => str_v(b"0.2.3"),
-        6 => str_v(b""),
+        6 => str_v(st.param_str.clone().unwrap_or_default().as_bytes()),
         7 => num(st.target_fps as f64),
         // Confirmed against official PICO-8 (sfx(3,0); stat(16)==3): stat
         // 16-19 is the per-channel sfx index, 20-23 is the note index --
@@ -2359,17 +2373,24 @@ fn api_shell_noop(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError
 // `run([param_str])` restarts the current cart. Reuses the load-switch
 // machinery with the current cart as target (high RAM preserved, same as a
 // load() round trip). Without a host (wasm/interactive), a no-op.
-fn api_run(i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+fn api_run(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     #[cfg(not(target_arch = "wasm32"))]
     if !i.host.is_null() {
         let st = i.host();
         if let Some(path) = st.cart_path.clone() {
+            // A run() with no param_str arg does NOT clear stat(6) --
+            // oracle-confirmed it keeps whatever the last run()/load()
+            // with an actual param_str set, so only overwrite when this
+            // call actually supplies one.
+            if let Some(Value::Str(s)) = a.first() {
+                st.param_str = Some(String::from_utf8_lossy(s).into_owned());
+            }
             st.pending_load = Some(path);
             return Err(RtError::msg(LOAD_SWITCH_MARKER));
         }
     }
     #[cfg(target_arch = "wasm32")]
-    let _ = i;
+    let _ = (i, a);
     Ok(vec![])
 }
 // extcmd("breadcrumb") returns to the cart that load()ed this one (the
@@ -2419,6 +2440,10 @@ fn api_load(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
                     Some(Value::Str(b)) => Some(String::from_utf8_lossy(b).into_owned()),
                     _ => None,
                 };
+                // Same "no arg -> don't clear" rule as run() -- see there.
+                if let Some(Value::Str(p)) = a.get(2) {
+                    st.param_str = Some(String::from_utf8_lossy(p).into_owned());
+                }
                 st.pending_load = Some(path);
                 return Err(RtError::msg(LOAD_SWITCH_MARKER));
             }

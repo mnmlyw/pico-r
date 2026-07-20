@@ -254,14 +254,14 @@ pub extern "C" fn web_update() {
     if engine.lua.had_error() {
         let msg = engine.lua.error_message().to_string();
         gfx::cls(&mut engine.state, 0);
-        gfx::draw_text(&mut engine.state.memory, b"LUA ERROR:", 2, 2, 8);
+        gfx::draw_text(&mut engine.state.memory, b"LUA ERROR:", 2, 2, 8, false);
         let bytes = msg.as_bytes();
         let mut y = 12i32;
         let mut start = 0usize;
         // Word-wrap to 30 chars (~120px)
         while start < bytes.len() && y < 120 {
             let end = (start + 30).min(bytes.len());
-            gfx::draw_text(&mut engine.state.memory, &bytes[start..end], 2, y, 7);
+            gfx::draw_text(&mut engine.state.memory, &bytes[start..end], 2, y, 7, false);
             start = end;
             y += 7;
         }

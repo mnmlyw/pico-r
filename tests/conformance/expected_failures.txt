@@ -27,7 +27,6 @@ elapsed-time-ticks-before-not-after-frame-callbacks
 # than fabricating a matching address.
 tostr-tostring-metamethod-ignored
 custom-font-5600-and-0e-0f-control-codes-broken
-print-no-autoscroll-below-y122
 # audio-control-code-0x07-not-parsed: partially fixed (see LEDGER) -- \a
 # now correctly consumes the rest of the string as an audio annotation
 # instead of drawing it as literal glyphs, matching 2 of 3 golden cases.
@@ -35,11 +34,7 @@ print-no-autoscroll-below-y122
 # count) cursor_y quirk whose real mechanism isn't understood -- left
 # open rather than special-cased to match by coincidence.
 audio-control-code-0x07-not-parsed
-sfx-same-id-channel-dedup
 cstore-filename-arg-unimplemented
-load-param-str-not-plumbed
-sspr-flip-noninteger-scale-untested
 pairs-hash-part-order-nondeterministic
-vararg-outside-vararg-function-no-error
 goto-forward-into-local-scope-not-rejected
 pow-operator-uses-real-math-not-integer-exponent-quirk

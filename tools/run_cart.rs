@@ -34,6 +34,7 @@ fn run_main() {
     let mut cart_path = args[1].clone();
     let mut preserved_high: Option<Vec<u8>> = None;
     let mut breadcrumb: Option<String> = None;
+    let mut param_str: Option<String> = None;
     let mut switches = 0u32;
 
     'boot: loop {
@@ -59,6 +60,7 @@ fn run_main() {
             .map(|p| p.to_string_lossy().into_owned());
         state.cart_path = Some(cart_path.clone());
         state.breadcrumb = breadcrumb.clone();
+        state.param_str = param_str.clone();
         if let Some(high) = &preserved_high {
             state.memory.ram[0x8000..].copy_from_slice(high);
         }
@@ -77,25 +79,27 @@ fn run_main() {
         let load_switch = |msg: &str| msg.contains(pico_r::pico_lua::api::LOAD_SWITCH_MARKER);
         // Perform the cart switch: carry high RAM and the breadcrumb into
         // the next boot iteration. Returns the new cart path.
-        let do_switch = |state: &mut PicoState| -> (String, Option<Vec<u8>>, Option<String>) {
-            let target = state
-                .pending_load
-                .take()
-                .expect("switch marker without target");
-            eprintln!("load(): switching to {}", target);
-            (
-                target,
-                Some(state.memory.ram[0x8000..].to_vec()),
-                state.breadcrumb.clone(),
-            )
-        };
+        let do_switch =
+            |state: &mut PicoState| -> (String, Option<Vec<u8>>, Option<String>, Option<String>) {
+                let target = state
+                    .pending_load
+                    .take()
+                    .expect("switch marker without target");
+                eprintln!("load(): switching to {}", target);
+                (
+                    target,
+                    Some(state.memory.ram[0x8000..].to_vec()),
+                    state.breadcrumb.clone(),
+                    state.param_str.clone(),
+                )
+            };
 
         let mut lua = LuaImpl::new();
         lua.set_recursion_limit(150_000);
         if let Err(e) = lua.load_cart(&mut state, &cart) {
             if load_switch(&e) && switches < 8 {
                 switches += 1;
-                (cart_path, preserved_high, breadcrumb) = do_switch(&mut state);
+                (cart_path, preserved_high, breadcrumb, param_str) = do_switch(&mut state);
                 continue 'boot;
             }
             if flip_limit_hit(&e) {
@@ -116,7 +120,7 @@ fn run_main() {
             let msg = lua.error_message();
             if load_switch(msg) && switches < 8 {
                 switches += 1;
-                (cart_path, preserved_high, breadcrumb) = do_switch(&mut state);
+                (cart_path, preserved_high, breadcrumb, param_str) = do_switch(&mut state);
                 continue 'boot;
             }
             if flip_limit_hit(msg) {
@@ -146,7 +150,7 @@ fn run_main() {
                 let msg = lua.error_message();
                 if load_switch(msg) && switches < 8 {
                     switches += 1;
-                    (cart_path, preserved_high, breadcrumb) = do_switch(&mut state);
+                    (cart_path, preserved_high, breadcrumb, param_str) = do_switch(&mut state);
                     continue 'boot;
                 }
                 if flip_limit_hit(msg) {
@@ -161,7 +165,7 @@ fn run_main() {
                 let msg = lua.error_message();
                 if load_switch(msg) && switches < 8 {
                     switches += 1;
-                    (cart_path, preserved_high, breadcrumb) = do_switch(&mut state);
+                    (cart_path, preserved_high, breadcrumb, param_str) = do_switch(&mut state);
                     continue 'boot;
                 }
                 if flip_limit_hit(msg) {

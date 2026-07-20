@@ -58,6 +58,12 @@ pub struct PicoState {
     pub cart_path: Option<String>,
     pub breadcrumb: Option<String>,
     pub pending_load: Option<String>,
+    /// `run()`/`load()`'s param_str argument, read back via `stat(6)` --
+    /// like `breadcrumb`, this is set by the call that triggers the switch
+    /// and must survive into the NEXT cart's execution, so it's carried
+    /// across boots by the host the same way (not reset in
+    /// `prepare_for_cart_load`).
+    pub param_str: Option<String>,
 }
 
 impl Default for PicoState {
@@ -91,6 +97,7 @@ impl PicoState {
             cart_path: None,
             breadcrumb: None,
             pending_load: None,
+            param_str: None,
         }
     }
 

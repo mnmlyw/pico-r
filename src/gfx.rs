@@ -159,6 +159,36 @@ pub fn cls(state: &mut PicoState, col: u8) {
     state.memory.ram[memory::ADDR_CLIP_BOTTOM as usize] = 128;
 }
 
+/// `print()`'s autoscroll: whenever a line advance would put the cursor
+/// past y=122 (the last row that still fits a 6px line before the screen
+/// edge), official PICO-8 scrolls the WHOLE screen up by the advancing
+/// line height first (oracle-confirmed: text printed near y=0 gets
+/// scrolled clean off, and the newly exposed bottom rows come in blank,
+/// not filled with whatever was drawn there) rather than drawing off the
+/// bottom edge or wrapping. Honors 0x5F55 in case the screen base is
+/// redirected, same as `cls`.
+pub fn scroll_screen_up(memory: &mut Memory, rows: i32) {
+    if rows <= 0 {
+        return;
+    }
+    let rows = (rows as usize).min(128);
+    let base = memory.screen_base() as usize;
+    const ROW_BYTES: usize = 64;
+    for row in 0..(128 - rows) {
+        for k in 0..ROW_BYTES {
+            let src = (base + (row + rows) * ROW_BYTES + k) & 0xFFFF;
+            let dst = (base + row * ROW_BYTES + k) & 0xFFFF;
+            memory.ram[dst] = memory.ram[src];
+        }
+    }
+    for row in (128 - rows)..128 {
+        for k in 0..ROW_BYTES {
+            let dst = (base + row * ROW_BYTES + k) & 0xFFFF;
+            memory.ram[dst] = 0;
+        }
+    }
+}
+
 pub fn draw_line(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8) {
     let dx = if x1 > x0 { x1 - x0 } else { x0 - x1 };
     let dy = if y1 > y0 { y1 - y0 } else { y0 - y1 };
@@ -838,10 +868,16 @@ pub fn sspr(
     let step_y = ((sh as i64) << 16) / dh as i64;
     for py in 0..dh {
         for px in 0..dw {
-            let ix = (if flip_x { dw - 1 - px } else { px }) as i64;
-            let iy = (if flip_y { dh - 1 - py } else { py }) as i64;
-            let sx_off = (((step_x >> 1) + ix * step_x) >> 16) as i32;
-            let sy_off = (((step_y >> 1) + iy * step_y) >> 16) as i32;
+            let ix = px as i64;
+            let iy = py as i64;
+            let mut sx_off = (((step_x >> 1) + ix * step_x) >> 16) as i32;
+            let mut sy_off = (((step_y >> 1) + iy * step_y) >> 16) as i32;
+            if flip_x {
+                sx_off = sw - 1 - sx_off;
+            }
+            if flip_y {
+                sy_off = sh - 1 - sy_off;
+            }
             if sx_off < 0 || sx_off >= sw || sy_off < 0 || sy_off >= sh {
                 continue;
             }
@@ -1004,6 +1040,7 @@ pub fn draw_text(
     start_x: i32,
     start_y: i32,
     col: u8,
+    autoscroll: bool,
 ) -> (i32, i32, i32) {
     let (cam_x, cam_y) = get_camera(memory);
     let mut x = start_x - cam_x;
@@ -1251,6 +1288,15 @@ pub fn draw_text(
             0x0A => {
                 x = start_x - cam_x;
                 y += char_h;
+                // Confirmed against official PICO-8: this autoscroll rule
+                // only applies to the cursor-register print() forms
+                // (`print(s)`/`print(s,col)`) -- a print() given EXPLICIT
+                // x/y coordinates never scrolls, even with embedded `\n`s
+                // that push well past y=122.
+                if autoscroll && y > 122 {
+                    scroll_screen_up(memory, char_h);
+                    y -= char_h;
+                }
             }
             0x0C => {
                 if i < text.len() {

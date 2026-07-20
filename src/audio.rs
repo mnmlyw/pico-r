@@ -219,6 +219,19 @@ impl Audio {
             return;
         }
 
+        // At most one channel plays a given sfx id at a time -- starting
+        // it on a new/explicit channel immediately stops (not just
+        // releases) any OTHER channel already playing that same id.
+        // Oracle-confirmed: sfx(0,0)..sfx(0,3) (same id, four different
+        // explicit channels in turn) leaves only the last channel
+        // reporting that id via stat(); the earlier three report -1, not
+        // still-playing-out.
+        for i in 0..NUM_CHANNELS {
+            if self.channels[i].sfx_id as i32 == sfx_id && !self.channels[i].finished {
+                self.stop_channel(i);
+            }
+        }
+
         let ch: usize = if channel_req >= 0 && (channel_req as usize) < NUM_CHANNELS {
             channel_req as usize
         } else {
