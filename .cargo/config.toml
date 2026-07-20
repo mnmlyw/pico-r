@@ -2,4 +2,8 @@
 # Build for the browser with: `cargo build --release --target wasm32-unknown-unknown`
 
 [target.wasm32-unknown-unknown]
-rustflags = ["-C", "target-feature=+bulk-memory"]
+# panic=abort lives here (not in Cargo.toml's [profile.release], which
+# would otherwise apply to every target including native host builds)
+# because native release binaries -- run-cart, dump-pp, dump-raw, and
+# `cargo test --release` -- need unwind to build/run at all.
+rustflags = ["-C", "target-feature=+bulk-memory", "-C", "panic=abort"]

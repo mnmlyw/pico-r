@@ -29,8 +29,12 @@ required-features = []
 opt-level = 3
 lto = true
 codegen-units = 1
-panic = "abort"
 strip = true
+# panic="abort" is NOT set here -- a blanket profile setting applies to
+# every target, not just wasm32-unknown-unknown, which broke `cargo test
+# --release`/native release binaries on a clean checkout (they need
+# unwind). It's scoped to the wasm32 target specifically via a rustflag
+# in .cargo/config.toml instead.
 
 [dependencies]
 miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
