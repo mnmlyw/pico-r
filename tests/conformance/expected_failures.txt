@@ -24,3 +24,39 @@ tostr-tostring-metamethod-ignored
 # deterministic array-part-first facts ARE implemented and locked by
 # pairs-array-part-first-deterministic.
 pairs-hash-part-bucket-order-numeric-keys
+# shift-count-overflow-clamped-not-zeroed: shl/shr/lshr clamp the shift
+# count to 31 via .min(31)/.clamp(0,31) before shifting, so a count >= 32
+# lands on the same result as count == 31 instead of the fully-shifted-out
+# value (0 for a left/logical shift, sign-extended 0/-1 for the arithmetic
+# right shift). Also found in the same probe: shl(x, n) for n < 0 delegates
+# to Rust's wrapping_shr (arithmetic, sign-preserving) but official PICO-8
+# treats a negative shl count as a LOGICAL right shift (matches lshr, not
+# shr) even for in-range counts -- shl(-1,-1) == lshr(-1,1) on real
+# hardware, not shr(-1,1). Both are real, generalizable rules in
+# src/pico_lua/api.rs's api_shl/api_shr/api_lshr, not probe-specific.
+shift-count-overflow-clamped-not-zeroed
+# split-nil-first-arg-no-error: api_split's arg_str(&a,0) falls back to an
+# empty byte string when arg 0 is nil/omitted instead of raising a runtime
+# error the way official PICO-8's split() does (a checklstring-style arg
+# check) -- pico-r has an established Err(RtError::msg(...)) pattern used
+# elsewhere in api.rs (setmetatable, rawset, cocreate) for exactly this.
+# src/pico_lua/api.rs (api_split).
+split-nil-first-arg-no-error
+# bitwise-op-lhs-precedence-vs-arith: try_bitwise_op extracts its LHS
+# operand via extract_lhs, the tight-binding scanner meant for assignment
+# targets/backslash int-div, which stops at +,-,*,/,% -- so every
+# bitwise/shift op binds TIGHTER than arithmetic on its left side, when
+# official PICO-8 is C-style (bitwise/shift bind LOOSER than arithmetic on
+# BOTH sides; the RHS scanner, extract_bitwise_rhs, already gets this
+# right). Needs an LHS scanner symmetric to extract_bitwise_rhs, not a
+# reuse of extract_lhs. src/preprocessor.rs (try_bitwise_op).
+bitwise-op-lhs-precedence-vs-arith
+# bitwise-rhs-truncates-at-whitespace: extract_bitwise_rhs hard-stops on
+# ANY space/tab at depth 0, unlike its sibling extract_rhs (used for +=,
+# >>=, etc.) which peeks past whitespace and only stops if the next token
+# looks like a new glued-together statement -- so `x = 1 >>> 16 - 8`
+# desugars to `lshr(1,16) - 8` instead of the correct `lshr(1,16-8)`.
+# Affects every operator routed through try_bitwise_op (band, bor, bxor,
+# shl, shr, lshr, rotl, rotr), not just shr/lshr. src/preprocessor.rs
+# (extract_bitwise_rhs).
+bitwise-rhs-truncates-at-whitespace

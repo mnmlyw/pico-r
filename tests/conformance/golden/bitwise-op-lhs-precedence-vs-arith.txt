@@ -1,0 +1,6 @@
+RESULT shift_add 3264
+RESULT and_add 8
+RESULT or_add 11
+RESULT sub_shr 4
+RESULT mul_bxor 7
+DONE

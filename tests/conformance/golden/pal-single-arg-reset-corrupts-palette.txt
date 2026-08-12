@@ -1,0 +1,24 @@
+RESULT drawpal_after_reset0 16
+RESULT drawpal9_after_reset0 9
+RESULT drawpal15_after_reset0 15
+RESULT screenpal_after_reset1 0
+RESULT screenpal9_after_reset1 9
+RESULT drawpal1_after_reset1 1
+RESULT drawpal0_transbit_after_reset0 16
+RESULT p2pal0_after_reset2 0
+RESULT p2pal1_after_reset2 1
+RESULT p2pal2_after_reset2 18
+RESULT p2pal3_after_reset2 19
+RESULT p2pal4_after_reset2 36
+RESULT p2pal5_after_reset2 21
+RESULT p2pal6_after_reset2 214
+RESULT p2pal7_after_reset2 103
+RESULT p2pal8_after_reset2 72
+RESULT p2pal9_after_reset2 73
+RESULT p2pal10_after_reset2 154
+RESULT p2pal11_after_reset2 59
+RESULT p2pal12_after_reset2 220
+RESULT p2pal13_after_reset2 93
+RESULT p2pal14_after_reset2 142
+RESULT p2pal15_after_reset2 239
+DONE

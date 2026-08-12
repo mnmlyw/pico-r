@@ -1,0 +1,5 @@
+RESULT shr_arith_space 0.0039
+RESULT band_arith_space 12
+RESULT shl_arith_space 8
+RESULT shr_arith_nospace 0.0039
+DONE

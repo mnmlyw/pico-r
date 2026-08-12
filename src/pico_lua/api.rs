@@ -957,7 +957,13 @@ fn api_tonum(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
 }
 
 fn api_sub(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let s = arg_str(&a, 0).unwrap_or_else(|| Rc::from(&[][..]));
+    // A non-string, non-number first argument (nil, bool, table, ...) passes
+    // straight through as nil rather than coercing to "" -- oracle-confirmed:
+    // type(sub(nil,1,2)) == "nil", not "string".
+    let s = match arg_str(&a, 0) {
+        Some(s) => s,
+        None => return Ok(vec![Value::Nil]),
+    };
     let len = s.len() as i64;
     let start_raw = opt_int(&a, 1, 1) as i64;
     let end_raw = opt_int(&a, 2, len as i32) as i64;
@@ -1836,10 +1842,15 @@ fn api_pal(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
             let Key::Int(key) = key else { continue };
             let k = key.rem_euclid(16) as usize;
             if !matches!(v, Value::Nil) {
-                let val = (v.as_number().unwrap_or(0.0) as i32 & 0xF) as u8;
+                let raw = v.as_number().unwrap_or(0.0) as i32 as u8;
                 if p == 1 {
-                    st.memory.ram[mem::ADDR_SCREEN_PAL as usize + k] = val;
+                    // Screen palette (0x5f10+) is raw unmasked storage, same
+                    // as p2 above -- NOT masked to 4 bits like the draw
+                    // palette. This is what lets the hidden/extended
+                    // palette bit (0x80+n) survive the write.
+                    st.memory.ram[mem::ADDR_SCREEN_PAL as usize + k] = raw;
                 } else {
+                    let val = raw & 0xF;
                     let trans = st.memory.ram[mem::ADDR_DRAW_PAL as usize + k] & 0x10;
                     st.memory.ram[mem::ADDR_DRAW_PAL as usize + k] = val | trans;
                 }
@@ -1847,17 +1858,52 @@ fn api_pal(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         }
         return Ok(vec![]);
     }
+    if a.len() == 1 {
+        // pal(p) with exactly one argument resets THAT palette to system
+        // defaults -- confirmed against official PICO-8, this is not a
+        // scalar remap with c1/p implicitly 0 (that misreading is what
+        // used to corrupt a single entry instead of resetting all 16).
+        let p = arg_int(&a, 0).unwrap_or(0);
+        match p {
+            1 => {
+                for k in 0..16 {
+                    st.memory.ram[mem::ADDR_SCREEN_PAL as usize + k] = k as u8;
+                }
+            }
+            2 => {
+                // System default p2 pattern, confirmed present at cart
+                // boot -- not derivable, it's just what the real console
+                // ships with in that storage block.
+                const P2_DEFAULT: [u8; 16] = [
+                    0, 1, 18, 19, 36, 21, 214, 103, 72, 73, 154, 59, 220, 93, 142, 239,
+                ];
+                for (k, v) in P2_DEFAULT.iter().enumerate() {
+                    st.memory.ram[0x5f60 + k] = *v;
+                }
+            }
+            _ => {
+                for k in 0..16 {
+                    st.memory.ram[mem::ADDR_DRAW_PAL as usize + k] = k as u8;
+                }
+                st.memory.ram[mem::ADDR_DRAW_PAL as usize] |= 0x10;
+            }
+        }
+        return Ok(vec![]);
+    }
     let c0 = arg_int(&a, 0).unwrap_or(0) as u8 & 0xF;
-    let c1 = arg_int(&a, 1).unwrap_or(0) as u8 & 0xF;
+    let c1_raw = arg_int(&a, 1).unwrap_or(0) as u8;
     let p = opt_int(&a, 2, 0);
     if p == 2 {
         // See the table-form comment above.
-        st.memory.ram[0x5f60 + c0 as usize] = arg_int(&a, 1).unwrap_or(0) as u8;
+        st.memory.ram[0x5f60 + c0 as usize] = c1_raw;
         return Ok(vec![]);
     }
     if p == 1 {
-        st.memory.ram[mem::ADDR_SCREEN_PAL as usize + c0 as usize] = c1;
+        // Screen palette register: raw unmasked storage, same reasoning as
+        // the table-form branch above.
+        st.memory.ram[mem::ADDR_SCREEN_PAL as usize + c0 as usize] = c1_raw;
     } else {
+        let c1 = c1_raw & 0xF;
         let trans = st.memory.ram[mem::ADDR_DRAW_PAL as usize + c0 as usize] & 0x10;
         st.memory.ram[mem::ADDR_DRAW_PAL as usize + c0 as usize] = c1 | trans;
     }

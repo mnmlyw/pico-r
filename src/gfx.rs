@@ -33,7 +33,13 @@ pub fn is_transparent(memory: &Memory, col: u8) -> bool {
 
 #[inline]
 fn get_screen_pal(memory: &Memory, col: u8) -> u8 {
-    memory.ram[memory::ADDR_SCREEN_PAL as usize + (col & 0x0F) as usize] & 0x0F
+    // Unlike the draw palette, the screen-palette register at
+    // ADDR_SCREEN_PAL is raw unmasked storage (api_pal writes the full
+    // byte, confirmed by hidden-extended-palette-128-143-masked-away) --
+    // so a cart can put any of 0-255 there, not just 0-15. `palette::COLORS`
+    // has exactly 32 entries (16 standard + 16 extended), so mask to that
+    // table's size rather than the draw palette's 4 bits.
+    memory.ram[memory::ADDR_SCREEN_PAL as usize + (col & 0x0F) as usize] & 0x1F
 }
 
 #[inline]

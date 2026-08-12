@@ -1,0 +1,7 @@
+RESULT type1 nil
+RESULT val1 [[nil]]
+RESULT type2 nil
+RESULT val2 [[nil]]
+RESULT type3 string
+RESULT val3 [he]
+DONE

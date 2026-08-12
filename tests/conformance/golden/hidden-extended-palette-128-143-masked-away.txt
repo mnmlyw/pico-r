@@ -1,0 +1,14 @@
+RESULT screenpal9_plain 10
+RESULT drawpal9_plain 10
+RESULT screenpal9_bit10 26
+RESULT screenpal9_bit80_nogate 138
+RESULT screenpal9_bit80_gate 138
+RESULT screenpal9_ext20_nogate 148
+RESULT screenpal9_ext20_gate 148
+RESULT screenpal9_ff 255
+RESULT drawpal9_bit80 10
+RESULT drawpal9_ext20 4
+RESULT drawpal9_ff 15
+RESULT peek_5f2e_after_poke1 1
+RESULT peek_5f2e_after_poke0 0
+DONE
