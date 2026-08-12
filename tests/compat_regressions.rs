@@ -1,9 +1,48 @@
 use pico_r::{
-    cart,
+    cart, gfx,
     memory::{self, Memory},
-    preprocessor,
+    palette, preprocessor,
     state::PicoState,
 };
+
+// Screen-palette register decode, captured off the real console via
+// extcmd("screen") composited frames. Bit 7 selects the extended half of
+// palette::COLORS, bits 0-3 index within it, bits 4-6 are ignored -- so this
+// is neither a `& 0x0F` nor a `& 0x1F` mask, both of which get most of these
+// wrong. (register value, expected palette::COLORS index)
+const SCREEN_PAL_ORACLE: [(u8, usize); 8] = [
+    (0x7e, 14),
+    (0x10, 0),
+    (0x8a, 26),
+    (0xff, 31),
+    (0x1e, 14),
+    (0x0e, 14),
+    (0x80, 16),
+    (0x8f, 31),
+];
+
+#[test]
+fn screen_palette_register_selects_extended_half_by_bit_7() {
+    for (reg, expected_idx) in SCREEN_PAL_ORACLE {
+        let mut memory = Memory::new();
+        memory.init_draw_state();
+        for y in 0..128u8 {
+            for x in 0..128u8 {
+                memory.screen_set(x, y, 1);
+            }
+        }
+        memory.ram[memory::ADDR_SCREEN_PAL as usize + 1] = reg;
+
+        let mut buf = [0u32; 128 * 128];
+        gfx::render_to_argb(&memory, &mut buf);
+
+        assert_eq!(
+            buf[64 * 128 + 64],
+            palette::COLORS[expected_idx],
+            "screen-pal register {reg:#04x} should composite to COLORS[{expected_idx}]"
+        );
+    }
+}
 
 #[test]
 fn p8_text_cart_loads_lua_and_data_sections() {
