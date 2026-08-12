@@ -256,7 +256,19 @@ fn process_line(
     let mut print_shorthand_active = *pending_print;
     *pending_print = false;
 
+    let mut term_start = out.len();
+    let mut term_stack: Vec<usize> = Vec::new();
+    let mut mark_scanned = out.len();
+    let mut mark_in_string: u8 = 0;
+
     while i < line.len() {
+        advance_term_marks(
+            out,
+            &mut mark_scanned,
+            &mut term_start,
+            &mut term_stack,
+            &mut mark_in_string,
+        );
         let ch = line[i];
 
         if *in_long_string {
@@ -421,17 +433,26 @@ fn process_line(
         // 3-char bitwise: >>>, <<>, ><
         if i + 2 < line.len() {
             if ch == b'>' && line[i + 1] == b'>' && line[i + 2] == b'>' {
-                if let Some(new_i) = try_bitwise_op(line, i, 3, b"lshr", out) {
+                if let Some(new_i) =
+                    try_bitwise_op(line, i, 3, b"lshr", PREC_SHIFT, term_start, out)
+                {
+                    mark_scanned = out.len();
                     i = new_i;
                     continue;
                 }
             } else if ch == b'<' && line[i + 1] == b'<' && line[i + 2] == b'>' {
-                if let Some(new_i) = try_bitwise_op(line, i, 3, b"rotl", out) {
+                if let Some(new_i) =
+                    try_bitwise_op(line, i, 3, b"rotl", PREC_SHIFT, term_start, out)
+                {
+                    mark_scanned = out.len();
                     i = new_i;
                     continue;
                 }
             } else if ch == b'>' && line[i + 1] == b'>' && line[i + 2] == b'<' {
-                if let Some(new_i) = try_bitwise_op(line, i, 3, b"rotr", out) {
+                if let Some(new_i) =
+                    try_bitwise_op(line, i, 3, b"rotr", PREC_SHIFT, term_start, out)
+                {
+                    mark_scanned = out.len();
                     i = new_i;
                     continue;
                 }
@@ -442,7 +463,9 @@ fn process_line(
                 && line[i + 1] == b'>'
                 && !(i + 2 < line.len() && (line[i + 2] == b'>' || line[i + 2] == b'<'))
             {
-                if let Some(new_i) = try_bitwise_op(line, i, 2, b"shr", out) {
+                if let Some(new_i) = try_bitwise_op(line, i, 2, b"shr", PREC_SHIFT, term_start, out)
+                {
+                    mark_scanned = out.len();
                     i = new_i;
                     continue;
                 }
@@ -450,12 +473,16 @@ fn process_line(
                 && line[i + 1] == b'<'
                 && !(i + 2 < line.len() && line[i + 2] == b'>')
             {
-                if let Some(new_i) = try_bitwise_op(line, i, 2, b"shl", out) {
+                if let Some(new_i) = try_bitwise_op(line, i, 2, b"shl", PREC_SHIFT, term_start, out)
+                {
+                    mark_scanned = out.len();
                     i = new_i;
                     continue;
                 }
             } else if ch == b'^' && line[i + 1] == b'^' {
-                if let Some(new_i) = try_bitwise_op(line, i, 2, b"bxor", out) {
+                if let Some(new_i) = try_bitwise_op(line, i, 2, b"bxor", PREC_BXOR, term_start, out)
+                {
+                    mark_scanned = out.len();
                     i = new_i;
                     continue;
                 }
@@ -484,6 +511,10 @@ fn process_line(
 
         // Compound assignments
         if let Some(new_i) = try_compound_assign(line, i, out) {
+            // A compound assignment is a whole statement -- what follows it
+            // starts a fresh term.
+            mark_scanned = out.len();
+            term_start = out.len();
             i = new_i;
             continue;
         }
@@ -491,6 +522,7 @@ fn process_line(
         // Integer division: \
         if ch == b'\\' && i + 1 < line.len() && line[i + 1] != b'=' {
             if let Some(new_i) = try_int_div(line, i, out) {
+                mark_scanned = out.len();
                 i = new_i;
                 continue;
             }
@@ -506,13 +538,15 @@ fn process_line(
 
         // Single-char bitwise
         if ch == b'&' && !(i + 1 < line.len() && line[i + 1] == b'=') {
-            if let Some(new_i) = try_bitwise_op(line, i, 1, b"band", out) {
+            if let Some(new_i) = try_bitwise_op(line, i, 1, b"band", PREC_BAND, term_start, out) {
+                mark_scanned = out.len();
                 i = new_i;
                 continue;
             }
         }
         if ch == b'|' && !(i + 1 < line.len() && line[i + 1] == b'=') {
-            if let Some(new_i) = try_bitwise_op(line, i, 1, b"bor", out) {
+            if let Some(new_i) = try_bitwise_op(line, i, 1, b"bor", PREC_BOR, term_start, out) {
+                mark_scanned = out.len();
                 i = new_i;
                 continue;
             }
@@ -525,7 +559,9 @@ fn process_line(
         // bnot(x)).
         if ch == b'~' && !(i + 1 < line.len() && line[i + 1] == b'=') {
             if is_prev_value(line, i) {
-                if let Some(new_i) = try_bitwise_op(line, i, 1, b"bxor", out) {
+                if let Some(new_i) = try_bitwise_op(line, i, 1, b"bxor", PREC_BXOR, term_start, out)
+                {
+                    mark_scanned = out.len();
                     i = new_i;
                     continue;
                 }
@@ -1232,6 +1268,101 @@ struct LhsResult<'a> {
     remove_count: usize,
 }
 
+// Keywords after which a new expression term begins. `not`, `nil`, `true`
+// and `false` are deliberately absent -- they are operands or unary
+// prefixes, and bind tighter than any bitwise operator.
+const TERM_BREAKING_KEYWORDS: [&[u8]; 17] = [
+    b"and",
+    b"or",
+    b"then",
+    b"do",
+    b"return",
+    b"if",
+    b"while",
+    b"elseif",
+    b"until",
+    b"else",
+    b"end",
+    b"local",
+    b"in",
+    b"repeat",
+    b"function",
+    b"for",
+    b"break",
+];
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80
+}
+
+/// Advance the "the current term starts here" mark over bytes newly appended
+/// to `out`. Called at the top of every `process_line` iteration, so it sees
+/// each emission no matter which transform produced it.
+///
+/// The mark is where a bitwise operator's LEFT operand begins. It resets past
+/// anything that cannot be part of an operand -- assignment, separators,
+/// comparisons, the statement and logical keywords -- and is saved/restored
+/// across bracket nesting, so `f(a+b)>>1` shifts the whole call rather than
+/// just the `a+b` inside it.
+fn advance_term_marks(
+    out: &[u8],
+    scanned: &mut usize,
+    term_start: &mut usize,
+    stack: &mut Vec<usize>,
+    in_string: &mut u8,
+) {
+    while *scanned < out.len() {
+        let k = *scanned;
+        let ch = out[k];
+        if *in_string != 0 {
+            *scanned += 1;
+            if ch == b'\\' {
+                *scanned = (*scanned + 1).min(out.len());
+            } else if ch == *in_string {
+                *in_string = 0;
+            }
+            continue;
+        }
+        if is_ident_byte(ch) && !ch.is_ascii_digit() {
+            // Consume the identifier whole. If it runs to the end of what
+            // has been emitted so far we cannot yet tell whether it is a
+            // keyword (only `r` of `return` may exist yet), so leave the
+            // mark alone and retry once more bytes land.
+            let mut e = k;
+            while e < out.len() && is_ident_byte(out[e]) {
+                e += 1;
+            }
+            if e == out.len() {
+                return;
+            }
+            let after_dot = k > 0 && out[k - 1] == b'.';
+            if !after_dot && TERM_BREAKING_KEYWORDS.contains(&&out[k..e]) {
+                *term_start = e;
+            }
+            *scanned = e;
+            continue;
+        }
+        *scanned += 1;
+        match ch {
+            b'"' | b'\'' => *in_string = ch,
+            b'(' | b'[' | b'{' => {
+                stack.push(*term_start);
+                *term_start = *scanned;
+            }
+            b')' | b']' | b'}' => {
+                if let Some(prev) = stack.pop() {
+                    *term_start = prev;
+                }
+            }
+            // `=` covers assignment and the tail of `==`/`~=`/`<=`/`>=`. A
+            // bare `<`/`>` reaching `out` is always a comparison, since every
+            // shift and rotate form was already rewritten into a call.
+            b',' | b';' | b'=' | b'<' | b'>' => *term_start = *scanned,
+            _ => {}
+        }
+    }
+}
+
 fn extract_lhs(out: &[u8]) -> LhsResult<'_> {
     let mut end = out.len();
     while end > 0 && (out[end - 1] == b' ' || out[end - 1] == b'\t') {
@@ -1625,7 +1756,54 @@ fn extract_simple_expr(line: &[u8], start: usize) -> ExprResult<'_> {
     }
 }
 
-fn extract_bitwise_rhs(line: &[u8], start: usize) -> ExprResult<'_> {
+// Binding strength of every infix operator that can appear between two
+// bitwise operands, loosest (1) to tightest (6). Oracle-confirmed to be
+// exactly Lua 5.3's table -- see probes/bitwise-precedence-lua53-table.
+// Notably this is NOT C's: there, bitwise binds looser than comparison,
+// where here it binds tighter (`x&1>0` is `(x&1)>0`, not `x&(1>0)`).
+//
+// An operand of a bitwise operator extends across every operator that
+// binds TIGHTER than that operator, and stops at one binding equally
+// (they are left-associative) or looser.
+const PREC_BOR: u8 = 1;
+const PREC_BXOR: u8 = 2;
+const PREC_BAND: u8 = 3;
+const PREC_SHIFT: u8 = 4;
+const PREC_CONCAT: u8 = 5;
+const PREC_ARITH: u8 = 6;
+
+/// The infix operator at `i` as (byte length, binding strength), or `None`
+/// for anything that ends a bitwise operand: comparisons, `~=`, the
+/// compound-assignment forms, and comment openers.
+fn infix_op_at(line: &[u8], i: usize) -> Option<(usize, u8)> {
+    let at = |k: usize| line.get(i + k).copied();
+    let ch = at(0)?;
+    let n1 = at(1);
+    let n2 = at(2);
+    // `x >>= 1` is a statement, not an operand continuation -- never let a
+    // compound assignment be absorbed into an expression.
+    let assign = |len: usize| at(len) == Some(b'=');
+    match ch {
+        b'>' if n1 == Some(b'>') && n2 == Some(b'>') => (!assign(3)).then_some((3, PREC_SHIFT)),
+        b'<' if n1 == Some(b'<') && n2 == Some(b'>') => (!assign(3)).then_some((3, PREC_SHIFT)),
+        b'>' if n1 == Some(b'>') && n2 == Some(b'<') => (!assign(3)).then_some((3, PREC_SHIFT)),
+        b'>' if n1 == Some(b'>') => (!assign(2)).then_some((2, PREC_SHIFT)),
+        b'<' if n1 == Some(b'<') => (!assign(2)).then_some((2, PREC_SHIFT)),
+        b'^' if n1 == Some(b'^') => (!assign(2)).then_some((2, PREC_BXOR)),
+        // `..` is concat; `...` is varargs and never an infix operator.
+        b'.' if n1 == Some(b'.') && n2 != Some(b'.') => (!assign(2)).then_some((2, PREC_CONCAT)),
+        b'&' => (!assign(1)).then_some((1, PREC_BAND)),
+        b'|' => (!assign(1)).then_some((1, PREC_BOR)),
+        // A bare `~` between two values is XOR; `~=` is inequality.
+        b'~' => (n1 != Some(b'=')).then_some((1, PREC_BXOR)),
+        b'-' if n1 == Some(b'-') => None,
+        b'/' if n1 == Some(b'/') => None,
+        b'+' | b'-' | b'*' | b'/' | b'%' | b'\\' | b'^' => (!assign(1)).then_some((1, PREC_ARITH)),
+        _ => None,
+    }
+}
+
+fn extract_bitwise_rhs(line: &[u8], start: usize, min_prec: u8) -> ExprResult<'_> {
     let mut i = start;
     while i < line.len() && (line[i] == b' ' || line[i] == b'\t') {
         i += 1;
@@ -1633,6 +1811,10 @@ fn extract_bitwise_rhs(line: &[u8], start: usize) -> ExprResult<'_> {
     let expr_start = i;
     let mut depth: i32 = 0;
     let mut in_str: u8 = 0;
+    // At the start of the operand (and again right after each operator we
+    // absorb), a `-`/`~`/`#`/`@`/`$`/`%` is a UNARY prefix rather than an
+    // infix operator -- `x & ~y` must take `~y` as the whole right operand.
+    let mut expect_operand = true;
     while i < line.len() {
         let ch = line[i];
         if in_str != 0 {
@@ -1645,6 +1827,9 @@ fn extract_bitwise_rhs(line: &[u8], start: usize) -> ExprResult<'_> {
             }
             if ch == in_str {
                 in_str = 0;
+                // A closed string literal IS the operand -- what follows is
+                // infix position, not another unary prefix.
+                expect_operand = false;
             }
             i += 1;
             continue;
@@ -1683,33 +1868,62 @@ fn extract_bitwise_rhs(line: &[u8], start: usize) -> ExprResult<'_> {
             break;
         }
         if depth == 0 {
+            if ch == b' ' || ch == b'\t' {
+                // Whitespace is not itself a boundary (`1 >>> 16 - 8` is
+                // `lshr(1,16-8)`, oracle-confirmed) -- but it IS wherever
+                // two golfed-together statements meet (`x=1&2 y=3`). Look
+                // past it: the operand only continues if a tighter-binding
+                // operator follows.
+                if expect_operand {
+                    i += 1;
+                    continue;
+                }
+                let mut k = i;
+                while k < line.len() && (line[k] == b' ' || line[k] == b'\t') {
+                    k += 1;
+                }
+                match infix_op_at(line, k) {
+                    Some((len, prec)) if prec > min_prec => {
+                        i = k + len;
+                        expect_operand = true;
+                        continue;
+                    }
+                    _ => break,
+                }
+            }
+            if expect_operand && matches!(ch, b'-' | b'~' | b'#' | b'@' | b'$' | b'%') {
+                i += 1;
+                continue;
+            }
             // `!` only ever occurs as the `!=` comparison in the PICO-8
             // dialect -- a hard stop, or `btn()&15!=x` captures `15!` into
             // the rewritten band() and the comparison never converts.
             // Confirmed on a real corpus cart (deepening-0.p8.png).
-            if matches!(
-                ch,
-                b',' | b';' | b' ' | b'\t' | b'>' | b'<' | b'=' | b'&' | b'|' | b'}' | b'{' | b'!'
-            ) {
+            if matches!(ch, b',' | b';' | b'}' | b'{' | b'!' | b'=') {
                 break;
             }
-            // `~` alone is the unary bitwise-NOT prefix (`~x` -> `bnot(x)`)
-            // and is valid RHS content -- only `~=` (inequality) is a real
-            // stop. Treating a bare `~` as an unconditional stop left it
-            // matching nothing (`x & ~y` has `~` as literally the first
-            // character after skipping whitespace), producing an empty RHS
-            // and leaving the whole `&` unconverted. Confirmed on a real
-            // corpus cart (donsol8_v1-14.p8.png: `mouseb & ~mouseb_last`).
-            if ch == b'~' && i + 1 < line.len() && line[i + 1] == b'=' {
-                break;
-            }
-            if ch == b'^' && i + 1 < line.len() && line[i + 1] == b'^' {
-                break;
+            match infix_op_at(line, i) {
+                // Absorb anything binding tighter than the operator whose
+                // right operand we are collecting; anything equal or looser
+                // ends it (these operators are all left-associative).
+                Some((len, prec)) => {
+                    if prec > min_prec {
+                        i += len;
+                        expect_operand = true;
+                        continue;
+                    }
+                    break;
+                }
+                // Comparisons bind looser than every bitwise operator, so
+                // they always end the operand.
+                None if matches!(ch, b'<' | b'>' | b'~') => break,
+                None => {}
             }
             if ch.is_ascii_alphabetic() && is_statement_keyword(line, i) {
                 break;
             }
         }
+        expect_operand = false;
         i += 1;
     }
     let mut end = i;
@@ -1932,21 +2146,29 @@ fn try_bitwise_op(
     pos: usize,
     op_len: usize,
     func_name: &[u8],
+    prec: u8,
+    term_start: usize,
     out: &mut Vec<u8>,
 ) -> Option<usize> {
-    let lhs_result = extract_lhs(out);
-    if lhs_result.lhs.is_empty() {
+    // The left operand is everything emitted since the current term began.
+    // `term_start` is tracked forward by process_line rather than recovered
+    // by scanning `out` backwards: a backward scan cannot tell an opening
+    // quote from a closing one, and the operand here can span a whole
+    // arithmetic/concat expression (`a+b>>1` shifts `a+b`, not just `b`).
+    let mut lhs_begin = term_start.min(out.len());
+    let mut lhs_end = out.len();
+    while lhs_begin < lhs_end && (out[lhs_begin] == b' ' || out[lhs_begin] == b'\t') {
+        lhs_begin += 1;
+    }
+    while lhs_end > lhs_begin && (out[lhs_end - 1] == b' ' || out[lhs_end - 1] == b'\t') {
+        lhs_end -= 1;
+    }
+    if lhs_begin == lhs_end {
         return None;
     }
-    if lhs_result.lhs.len() > 256 {
-        return None;
-    }
-    let mut lhs_buf = [0u8; 256];
-    lhs_buf[..lhs_result.lhs.len()].copy_from_slice(lhs_result.lhs);
-    let lhs_len = lhs_result.lhs.len();
-    let lhs = &lhs_buf[..lhs_len];
+    let lhs: Vec<u8> = out[lhs_begin..lhs_end].to_vec();
 
-    let rhs_info = extract_bitwise_rhs(line, pos + op_len);
+    let rhs_info = extract_bitwise_rhs(line, pos + op_len, prec);
     if rhs_info.expr.is_empty() {
         return None;
     }
@@ -1966,10 +2188,10 @@ fn try_bitwise_op(
         p
     };
 
-    out.truncate(out.len() - lhs_result.remove_count);
+    out.truncate(lhs_begin);
     out.extend_from_slice(func_name);
     out.push(b'(');
-    out.extend_from_slice(lhs);
+    out.extend_from_slice(&lhs);
     out.push(b',');
     out.extend_from_slice(&processed_rhs);
     out.push(b')');

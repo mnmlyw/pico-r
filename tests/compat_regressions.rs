@@ -100,6 +100,69 @@ fn preprocessor_maps_high_byte_glyphs_to_p8_identifiers() {
 }
 
 #[test]
+fn preprocessor_bitwise_ops_bind_with_lua53_precedence() {
+    // The preprocessor rewrites infix bitwise ops into calls as TEXT, so it
+    // has to pick each operand's extent without a parser. These lock the
+    // extents against the oracle-measured binding order (see the probe
+    // bitwise-precedence-lua53-table): arithmetic and concat bind tighter
+    // than any bitwise op, shifts tighter than `&`, `&` tighter than `^^`,
+    // `^^` tighter than `|`, and comparisons looser than all of them.
+    let cases: &[(&[u8], &str)] = &[
+        // left operand spans a whole arithmetic expression, not just `b`
+        (b"x=a+b>>1", "shr(a+b,1)"),
+        // right operand keeps going through whitespace and arithmetic
+        (b"x=1 >>> 16 - 8", "lshr(1,16 - 8)"),
+        // `&` binds tighter than `|`, so it becomes the inner call
+        (b"x=4|3&1", "bor(4,band(3,1))"),
+        // same-level runs are left-associative
+        (b"x=7&6&5", "band(band(7,6),5)"),
+        // concat binds tighter, so it stays inside the operand
+        (b"x=1 .. 2 & 3", "band(1 .. 2,3)"),
+        // comparison binds looser, so it stays outside the call
+        (b"x=dget(0)&1<<e>0", "band(dget(0),shl(1,e))>0"),
+        // a call is one operand -- the extent must not stop inside its parens
+        (b"x=f(a+b)>>1", "shr(f(a+b),1)"),
+    ];
+    for (src, expected) in cases {
+        let out = preprocessor::preprocess(src);
+        let out = String::from_utf8_lossy(&out);
+        assert!(
+            out.contains(expected),
+            "{:?} should desugar to contain {expected:?}; got {out:?}",
+            String::from_utf8_lossy(src)
+        );
+    }
+}
+
+#[test]
+fn preprocessor_bitwise_operand_stops_at_term_boundaries() {
+    // The left operand is bounded by whatever ended the previous term. Each
+    // of these would silently swallow unrelated code if that tracking were
+    // wrong -- and the generated call names are themselves a trap, since
+    // `band(` contains `and` and `bor(` contains `or`.
+    let cases: &[(&[u8], &str)] = &[
+        (b"return a&1", "return band(a,1)"),
+        (b"if a&1 then end", "if band(a,1) then end"),
+        (b"a=b and c&1", "a=b and band(c,1)"),
+        // two golfed-together statements: the operand ends at the space
+        (b"x=1&2 y=3", "x=band(1,2) y=3"),
+        // `end` here is a field name, not the keyword
+        (b"x=t.end_x&1", "band(t.end_x,1)"),
+        // a keyword inside a string must not end the operand
+        (b"x=a&\"end\"", "band(a,\"end\")"),
+    ];
+    for (src, expected) in cases {
+        let out = preprocessor::preprocess(src);
+        let out = String::from_utf8_lossy(&out);
+        assert!(
+            out.contains(expected),
+            "{:?} should desugar to contain {expected:?}; got {out:?}",
+            String::from_utf8_lossy(src)
+        );
+    }
+}
+
+#[test]
 fn preprocessor_skips_short_if_when_body_continues_with_or_and() {
     // Short-if expansion must NOT fire when the body looks like a multi-line
     // condition continuation. Otherwise `if (a) or` becomes `if a then or end`.

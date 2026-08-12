@@ -1,0 +1,7 @@
+RESULT raw 36
+RESULT bit0 false
+RESULT bit2 true
+RESULT bit5 true
+RESULT bit7 false
+RESULT shifted_mask true
+DONE

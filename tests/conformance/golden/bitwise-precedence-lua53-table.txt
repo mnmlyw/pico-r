@@ -1,0 +1,27 @@
+RESULT add_and 3
+RESULT add_shr 5
+RESULT mod_shl 12
+RESULT mul_and 4
+RESULT neg_and 3
+RESULT or_and 5
+RESULT or_xor 3
+RESULT xor_and 7
+RESULT and_or_mix 13
+RESULT shl_and 4
+RESULT shl_shr 16
+RESULT and_and 4
+RESULT tilde_and 7
+RESULT or_tilde 6
+RESULT rotl_and 2
+RESULT cat_and 0
+RESULT and_cat 1
+RESULT shl_cat 4096
+RESULT or_cat 23
+RESULT ws_lshr 0.0039
+RESULT ws_shr 8
+RESULT and_lt false
+RESULT and_gt true
+RESULT shl_gt true
+RESULT corpus_flag true
+RESULT corpus_flag2 true
+DONE
