@@ -1073,13 +1073,27 @@ pub fn draw_text(
     let mut bg_color: Option<u8> = None;
     let mut pinball = false;
     // `\014`/`\015` (0x0E/0x0F) toggle between the CUSTOM font (glyph N's
-    // bitmap at `0x5600 + N*8`, one byte per row MSB-first = leftmost
-    // pixel, `width`/`height` read from `0x5600`/`0x5602`) and the
-    // default built-in font -- oracle-confirmed via a filled-solid custom
-    // font: `\014A` renders the full custom glyph (all bits set -> a
-    // solid 8x8 block), while `\015A` reverts to the ORDINARY built-in
-    // 'A' glyph, not just a narrower custom one.
-    let mut custom_font = false;
+    // bitmap at `0x5600 + N*8`, one byte per row, `width`/`height` read
+    // from `0x5600`/`0x5602`) and the default built-in font --
+    // oracle-confirmed via a filled-solid custom font: `\014A` renders the
+    // full custom glyph (all bits set -> a solid 8x8 block), while `\015A`
+    // reverts to the ORDINARY built-in 'A' glyph, not just a narrower
+    // custom one.
+    //
+    // The font is ALSO selectable without any control code, via the
+    // register at 0x5F58. Swept all 256 values against the console: it
+    // switches print() to the custom font exactly when bit 7 is set, bit 5
+    // is CLEAR, and bit 0 is set -- `(reg & 0xA1) == 0x81`. Bit 5 vetoing
+    // an otherwise-enabled register is the non-obvious part; bit 6 and bits
+    // 1-4 do not affect whether the custom font is selected (several of
+    // them do change how it is drawn -- bit 2 doubles width, for one -- but
+    // that mapping is not established and is deliberately not guessed at
+    // here). Real carts drive this: ascent-0 installs a font at 0x5600 in
+    // `_init` and enables it with `poke(0x5f58,0x81)`.
+    let mut custom_font = memory.ram[0x5F58] & 0xA1 == 0x81;
+    if custom_font {
+        char_w = memory.ram[0x5600] as i32;
+    }
     // `\v` (0x0B) "decorate previous character": anchor is NOT the current
     // draw cursor but a one-token-delayed snapshot of it (see comment at
     // the 0x0B arm) -- oracle-locked against a chain of `\v` decorations
@@ -1490,15 +1504,21 @@ fn char_width(code: u8, char_w: i32) -> i32 {
     }
 }
 
-// Custom font (`\014`, 0x0E) glyph bit lookup: glyph N's bitmap is a
-// fixed 8 bytes at `0x5600 + N*8` (one byte per row, regardless of the
-// configured height -- oracle-confirmed a height=4 custom font still
-// uses an 8-byte stride, not 4), MSB-first (bit 7 = leftmost column) --
-// oracle-locked via an asymmetric per-row bit pattern (0x81 -> lit at
-// both x=0 and x=7).
+// Custom font glyph bit lookup: glyph N's bitmap is a fixed 8 bytes at
+// `0x5600 + N*8` (one byte per row, regardless of the configured height --
+// oracle-confirmed a height=4 custom font still uses an 8-byte stride, not
+// 4), LSB-first: bit 0 is the LEFTMOST column.
+//
+// This was previously recorded as MSB-first, "oracle-locked via an
+// asymmetric per-row bit pattern (0x81 -> lit at both x=0 and x=7)". 0x81
+// is `10000001`, which is symmetric under bit reversal, so that probe could
+// never have distinguished the two orders and the wrong one was locked in.
+// Re-measured with rows that ARE asymmetric -- a row of 0x01 lights only
+// x=0 and a row of 0x80 lights only x=7 -- on both the `\014` and the
+// 0x5F58 paths, which agree.
 fn custom_font_pixel(memory: &Memory, code: u8, px: u8, py: u8) -> bool {
     let addr = (0x5600usize + code as usize * 8 + py as usize) & 0xFFFF;
-    memory.ram[addr] & (0x80 >> px) != 0
+    memory.ram[addr] & (1u8 << px) != 0
 }
 
 // General glyph blit honouring the P8SCII rendering-attribute state

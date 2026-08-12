@@ -1,0 +1,18 @@
+RESULT reg_row0 #.......
+RESULT reg_row1 .......#
+RESULT reg_row2 ####....
+RESULT ctl_row0 #.......
+RESULT ctl_row1 .......#
+RESULT ctl_row2 ####....
+RESULT enable_0 custom=false
+RESULT enable_1 custom=false
+RESULT enable_128 custom=false
+RESULT enable_129 custom=true
+RESULT enable_131 custom=true
+RESULT enable_161 custom=false
+RESULT enable_193 custom=true
+RESULT enable_225 custom=false
+RESULT enable_159 custom=true
+RESULT enable_223 custom=true
+RESULT enable_255 custom=false
+DONE
