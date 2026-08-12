@@ -12,7 +12,14 @@ pub struct PicoState {
     pub pixel_buffer: [u32; SCREEN_W * SCREEN_H],
 
     pub frame_count: u32,
+    /// Quantized 16.16 value that `time()`/`t()` return. Derived from
+    /// `time_60ths`, never accumulated -- see `tick_time`.
     pub elapsed_time: f64,
+    /// Elapsed time counted in exact 60ths of a second. 60 is the common
+    /// denominator of both frame rates, so a run that mixes them (the boot
+    /// tick is always 1/30, later ticks follow `target_fps`) still lands on
+    /// an exact integer.
+    pub time_60ths: u64,
     pub target_fps: u8,
     // Real PICO-8's rnd()/srand() PRNG state (oracle-confirmed algorithm,
     // see api.rs's rng_step/api_srand): two interleaved 32-bit words seeded
@@ -83,6 +90,7 @@ impl PicoState {
             pixel_buffer: [0xFF000000; SCREEN_W * SCREEN_H],
             frame_count: 0,
             elapsed_time: 0.0,
+            time_60ths: 0,
             target_fps: 30,
             rng_hi: 0xd67ce1e8,
             rng_lo: 0x42cfadf8,
@@ -101,11 +109,32 @@ impl PicoState {
         }
     }
 
+    /// Advance elapsed time by one frame at `fps`, then recompute the value
+    /// `time()`/`t()` reports.
+    ///
+    /// This must not be an `elapsed_time += 1.0 / fps` accumulation. `1/30` is
+    /// not representable in binary floating point, so a running sum lands a
+    /// hair BELOW the exact rational, and truncating that to PICO-8's 16.16
+    /// grid loses a whole ULP at every frame where the true value is exactly
+    /// on the grid -- t()==0.5 read back as 0x0000.7fff instead of 0x0000.8000
+    /// (frame 14 at 30fps), t()==1.0 as 0x0000.ffff instead of 0x0001.0000
+    /// (frame 29), and so on every 15 frames forever. Carts that key motion
+    /// off `time()` visibly desync from the console at those frames.
+    ///
+    /// Counting exact 60ths and dividing once keeps every value on the grid.
+    pub fn tick_time(&mut self, fps: u8) {
+        self.time_60ths += if fps >= 60 { 1 } else { 2 };
+        // Truncating division, matching the console: 3/30 reads back as
+        // 0x0000.1999 (6553), not the 6554 that rounding would give.
+        self.elapsed_time = (self.time_60ths * 65536 / 60) as f64 / 65536.0;
+    }
+
     pub fn prepare_for_cart_load(&mut self) {
         self.audio.reset();
         self.rng_hi = 0xd67ce1e8;
         self.rng_lo = 0x42cfadf8;
         self.elapsed_time = 0.0;
+        self.time_60ths = 0;
         self.frame_count = 0;
         self.line_x = 0;
         self.line_y = 0;

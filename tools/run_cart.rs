@@ -153,7 +153,7 @@ fn run_main() {
             // elapsed-time-ticks-before-not-after-frame-callbacks.
             state.frame_count += 1;
             state.target_fps = if lua.use_60fps() { 60 } else { 30 };
-            state.elapsed_time += 1.0 / state.target_fps as f64;
+            state.tick_time(state.target_fps);
             lua.call_update(&mut state);
             if lua.had_error() {
                 let msg = lua.error_message();

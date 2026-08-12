@@ -162,7 +162,7 @@ impl LuaEngine for LuaImpl {
         // `_update60`) isn't determined until AFTER this chunk runs and
         // `detect_lifecycle` below inspects what it defined.
         state.frame_count += 1;
-        state.elapsed_time += 1.0 / 30.0;
+        state.tick_time(30);
 
         // Top-level block: wrap in a Lua function so `return` works at chunk level
         // and varargs are bound to the top frame as empty.

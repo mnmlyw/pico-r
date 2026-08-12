@@ -74,6 +74,7 @@ struct Snapshot {
     rng_hi: u32,
     rng_lo: u32,
     elapsed_time: f64,
+    time_60ths: u64,
     frame_count: u32,
     target_fps: u8,
     line_x: i32,
@@ -248,7 +249,7 @@ pub extern "C" fn web_update() {
     // elapsed-time-ticks-before-not-after-frame-callbacks.
     engine.state.frame_count += 1;
     engine.state.target_fps = if engine.lua.use_60fps() { 60 } else { 30 };
-    engine.state.elapsed_time += 1.0 / engine.state.target_fps as f64;
+    engine.state.tick_time(engine.state.target_fps);
 
     engine.lua.call_update(&mut engine.state);
     engine.lua.call_draw(&mut engine.state);
@@ -367,6 +368,7 @@ pub extern "C" fn web_save_state() -> u32 {
         rng_hi: engine.state.rng_hi,
         rng_lo: engine.state.rng_lo,
         elapsed_time: engine.state.elapsed_time,
+        time_60ths: engine.state.time_60ths,
         frame_count: engine.state.frame_count,
         target_fps: engine.state.target_fps,
         line_x: engine.state.line_x,
@@ -427,6 +429,7 @@ pub unsafe extern "C" fn web_load_state(data_ptr: *const u8, data_len: u32) -> u
         engine.state.rng_hi = snap.rng_hi;
         engine.state.rng_lo = snap.rng_lo;
         engine.state.elapsed_time = snap.elapsed_time;
+        engine.state.time_60ths = snap.time_60ths;
         engine.state.frame_count = snap.frame_count;
         engine.state.target_fps = snap.target_fps;
         engine.state.line_x = snap.line_x;

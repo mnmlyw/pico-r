@@ -2651,7 +2651,8 @@ fn api_flip(i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let st = i.host();
     st.flip_count += 1;
     st.frame_count += 1;
-    st.elapsed_time += 1.0 / st.target_fps as f64;
+    let fps = st.target_fps;
+    st.tick_time(fps);
     if st.flip_limit != 0 && st.flip_count > st.flip_limit {
         return Err(RtError::msg(FLIP_LIMIT_MARKER));
     }
