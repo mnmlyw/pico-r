@@ -94,14 +94,35 @@ impl Memory {
     /// sprite-read or screen-write to a different region of RAM (e.g.
     /// bigprint's "draw small text, then sspr-scale it from screen-as-sprite"
     /// trick that pokes 0x5F54=0x60).
+    /// Real PICO-8 does not honour an arbitrary byte here. It only redirects
+    /// to an 8 KB-aligned page that is neither the map (0x2000) nor the SFX
+    /// (0x4000) region, and that still leaves 8 KB of RAM above it -- so the
+    /// accepted set is exactly {0x00, 0x60, 0x80, 0xA0, 0xC0, 0xE0}. Any other
+    /// byte is STORED (it reads back from the register) but ignored, and the
+    /// base stays at the default. Swept 0..255 against the console.
+    ///
+    /// This matters because carts poke the register and forget to restore it:
+    /// gunturtle_cafe-0's `warp_screen()` leaves 0x5F55 at 1 on every frame,
+    /// which official ignores and pico-r used to honour -- sending every
+    /// subsequent draw to 0x0100 and freezing the real screen after frame 1.
+    #[inline]
+    fn page_base(reg: u8, default: u16) -> u16 {
+        let accepted = reg == 0x00 || (reg & 0x1F == 0 && (0x60..=0xE0).contains(&reg));
+        if accepted {
+            (reg as u16) << 8
+        } else {
+            default
+        }
+    }
+
     #[inline]
     pub fn sprite_base(&self) -> u16 {
-        (self.ram[ADDR_SPRITE_PAGE as usize] as u16) << 8
+        Self::page_base(self.ram[ADDR_SPRITE_PAGE as usize], 0x0000)
     }
 
     #[inline]
     pub fn screen_base(&self) -> u16 {
-        (self.ram[ADDR_SCREEN_PAGE as usize] as u16) << 8
+        Self::page_base(self.ram[ADDR_SCREEN_PAGE as usize], ADDR_SCREEN)
     }
 
     pub fn init_draw_state(&mut self) {

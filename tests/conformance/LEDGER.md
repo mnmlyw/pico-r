@@ -866,3 +866,15 @@ The harness was validated in both directions before any result from it was belie
 Stated plainly, because it is the most important number here: **none of the 39 has been root-caused.** They are a triage queue, not a bug list, and some may still turn out to be harness artifacts of a kind `analyze.py` does not model. The 47 `no-official` carts are also a real coverage hole rather than passes -- mostly PICO-8's 8192-token limit rejecting the cart once the shim is added.
 
 What this does say, with evidence: the true conformance picture is 89 confirmed-matching carts out of 134 comparable, not the 187/188 the exit-code sweep reports. Baseline checked in at `tests/conformance/diffsweep_baseline.tsv` so future work can be diffed against it. | `tools/diffharness/` (new)
+
+### Round 59: the page-mapping registers accepted any byte -- found by the new differential harness
+
+First fix driven by `tools/diffharness/`, and the first end-to-end demonstration that the capability works: the harness flagged `gunturtle_cafe-0` as diverging from frame 2, triage root-caused it, and after the fix the same harness reports the cart matching across all 20 frames.
+
+`Memory::screen_base`/`sprite_base` computed `(register_byte as u16) << 8` with no validation, so pico-r honoured *any* value poked into 0x5F54/0x5F55. The real console does not. Swept 0..255 against the binary: the accepted set is exactly **{0x00, 0x60, 0x80, 0xA0, 0xC0, 0xE0}** -- 8 KB-aligned, not the map (0x2000) or SFX (0x4000) region, and leaving 8 KB of RAM above the base. Note 0x20 and 0x40 *are* 8 KB-aligned and are still rejected, so alignment alone is not the rule and a fix that only checked alignment would be wrong. Any rejected byte is still STORED -- it reads back from the register -- it simply has no effect, and the base stays at its default.
+
+The corpus consequence is severe and exactly the shape the old sweep cannot see. `gunturtle_cafe-0`'s `warp_screen()` pokes `0x5f55,0` then `0x5f55,1` and never restores it, and `_draw` calls `warp_screen` as its last statement every frame. Official ignores the trailing `1`, so drawing continues to the real screen. pico-r took it literally, so from the end of frame 1 every subsequent draw -- cls, map, spr, print, everything -- went to 0x0100 instead, and the actual screen froze at its frame-1 contents for the rest of the run. The cart still exits 0 with a plausible nonzero byte count, which is why 50+ rounds of exit-code sweeps never noticed.
+
+Worth recording that the earlier suspicion about this cart was wrong: it had been on the list as a *palette* problem. With 0x5F55 handled, all 20 frames match including `pal(0)`, the extended-range `pal(9,4,1)`/`pal(13,143,1)` screen-palette writes and the `pal({...},2)` secondary-palette table, so the two recent palette fixes were already correct and this was always a memory-mapping bug wearing a palette costume.
+
+Locked by `page-registers-reject-unaligned-values`, which checks the full accepted/rejected split on both registers plus the reads-back-anyway behaviour. | `src/memory.rs` (`screen_base`, `sprite_base`, new `page_base`)

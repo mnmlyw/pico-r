@@ -1,0 +1,23 @@
+RESULT screenpage_0 at_page=7 at_default=0
+RESULT screenpage_1 at_page=0 at_default=7
+RESULT screenpage_32 at_page=0 at_default=7
+RESULT screenpage_64 at_page=0 at_default=7
+RESULT screenpage_95 at_page=0 at_default=7
+RESULT screenpage_96 at_page=7 at_default=7
+RESULT screenpage_97 at_page=0 at_default=7
+RESULT screenpage_127 at_page=0 at_default=7
+RESULT screenpage_128 at_page=7 at_default=0
+RESULT screenpage_160 at_page=7 at_default=0
+RESULT screenpage_176 at_page=0 at_default=7
+RESULT screenpage_192 at_page=7 at_default=0
+RESULT screenpage_224 at_page=7 at_default=0
+RESULT screenpage_240 at_page=0 at_default=7
+RESULT screenpage_255 at_page=0 at_default=7
+RESULT rejected_still_readable 55
+RESULT spritepage_0 sget=14
+RESULT spritepage_1 sget=0
+RESULT spritepage_32 sget=0
+RESULT spritepage_96 sget=14
+RESULT spritepage_128 sget=14
+RESULT spritepage_255 sget=0
+DONE
