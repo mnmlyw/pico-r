@@ -74,6 +74,44 @@ fn preprocessor_skips_short_if_when_body_continues_with_or_and() {
 }
 
 #[test]
+fn preprocessor_short_if_terminates_at_unmatched_end() {
+    // Oracle-confirmed (see LEDGER + shortif-end-balance-rules probe): a
+    // short-if body ends at the first `end` not matched by an opener
+    // inside the body -- the synthetic `end` is flushed BEFORE it, and the
+    // explicit `end` is left to close the enclosing block. Statements
+    // after it on the same line parse OUTSIDE that block.
+    let src: &[u8] = b"for i=1,3 do if(i==2)x+=1 end x+=100";
+    let out = preprocessor::preprocess(src);
+    let out = String::from_utf8_lossy(&out);
+    let syn = out
+        .find(" end end")
+        .expect("synthetic end flushed before the explicit end");
+    assert!(
+        out[syn + 8..].contains("x = x + (100)") || out[syn + 8..].contains("x+=100"),
+        "trailing statement must be after both ends; got {out:?}"
+    );
+}
+
+#[test]
+fn preprocessor_if_cond_do_is_block_if_not_short_if() {
+    // Oracle-confirmed: `if(cond)do ... end` is a block-if -- the `do`
+    // acts as the separator (rewritten to `then` for the parser) and the
+    // body ends at its matching `end`; no synthetic end is owed.
+    let src: &[u8] = b"if(x>0)do x+=1 end x+=10";
+    let out = preprocessor::preprocess(src);
+    let out = String::from_utf8_lossy(&out);
+    assert!(
+        out.contains("then"),
+        "do separator rewritten to then; got {out:?}"
+    );
+    assert_eq!(
+        out.matches("end").count(),
+        1,
+        "block-if owes no synthetic end; got {out:?}"
+    );
+}
+
+#[test]
 fn fixture_hello_p8_loads_clean() {
     let data = include_bytes!("fixtures/hello.p8");
     let mut state = PicoState::new();

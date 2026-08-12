@@ -797,6 +797,15 @@ fn find_own_separator(line: &[u8], start: usize) -> Option<usize> {
             } else if match_keyword_at(line, i, b"end") {
                 nest -= 1;
             } else if nest == 0
+                && (match_keyword_at(line, i, b"elseif") || match_keyword_at(line, i, b"else"))
+            {
+                // An `elseif`/`else` at depth 0 before any own separator
+                // means this IS a short-if whose body absorbed the clause
+                // (oracle-confirmed: `if(c)a elseif d then b end` -- the
+                // elseif binds to the short-if; its `then` belongs to the
+                // elseif clause, not to this statement's opener).
+                return None;
+            } else if nest == 0
                 && (match_keyword_at(line, i, b"then") || match_keyword_at(line, i, b"do"))
             {
                 let kw_len = if line[i] == b't' { 4 } else { 2 };
@@ -822,6 +831,13 @@ fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
     let mut expanded_any = false;
     let mut i = 0;
     let mut in_str: u8 = 0;
+    // Block-opener balance WITHIN the current short-if bodies, plus a
+    // one-shot "this statement's separator is coming" flag so `for..do`/
+    // `while..do`/`if..then` count once (the statement keyword, not its
+    // separator) and `elseif..then` counts zero. See the `end`/`until`
+    // arms below for the rule this feeds.
+    let mut nest: i32 = 0;
+    let mut awaiting_sep: Option<u8> = None;
 
     while i < line.len() {
         let ch = line[i];
@@ -996,6 +1012,10 @@ fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
                             result.push(b' ');
                             result.extend_from_slice(separator);
                             result.push(b' ');
+                            if ends_needed == 0 {
+                                nest = 0;
+                                awaiting_sep = None;
+                            }
                             ends_needed += 1;
                             if rest_after_body[0] == b'?' {
                                 // The short-if body is a `?` print-shorthand,
@@ -1024,6 +1044,70 @@ fn expand_short_ifs(line: &[u8]) -> Option<Vec<u8>> {
                         }
                     }
                 }
+            }
+        }
+
+        // Track block structure so a pending short-if can terminate at the
+        // right token. Oracle-locked (see LEDGER round on pico1karena and
+        // the shortif-* conformance probes, ~40 probe cases): a short-if/
+        // short-while body runs to end-of-line OR to the first `end`/`until`
+        // not matched by a statement opener inside the body -- whichever
+        // comes first. That unmatched token flushes the synthetic `end`s of
+        // ALL currently-pending short forms immediately BEFORE it, and is
+        // itself left in place to close the next enclosing block (even one
+        // opened on an earlier line; if nothing is open it's a load-time
+        // syntax error, exactly like official). `else`/`elseif` do NOT
+        // terminate a short-if -- they're absorbed into it. Statement
+        // openers count once each: `for x in y do` is +1 at `for` (the
+        // awaiting flag swallows its own `do`), `if a then b elseif c then
+        // d end` is +1/-1 (elseif re-arms the flag so neither `then`
+        // counts), a bare `do` block is +1. Also handled here: the
+        // `if (cond) do` block-form (oracle-confirmed NOT a short-if --
+        // `do` acts as the separator and the body ends at its matching
+        // `end`), rewritten to `then` since the Lua parser expects it.
+        if ch.is_ascii_alphabetic() {
+            let mut handled = false;
+            if match_keyword_at(line, i, b"if") {
+                nest += 1;
+                awaiting_sep = Some(b'i');
+            } else if match_keyword_at(line, i, b"while") {
+                nest += 1;
+                awaiting_sep = Some(b'w');
+            } else if match_keyword_at(line, i, b"for") {
+                nest += 1;
+                awaiting_sep = Some(b'f');
+            } else if match_keyword_at(line, i, b"elseif") {
+                awaiting_sep = Some(b'e');
+            } else if match_keyword_at(line, i, b"function") || match_keyword_at(line, i, b"repeat")
+            {
+                nest += 1;
+            } else if match_keyword_at(line, i, b"then") {
+                awaiting_sep = None;
+            } else if match_keyword_at(line, i, b"do") {
+                if let Some(kind) = awaiting_sep.take() {
+                    if kind == b'i' {
+                        result.extend_from_slice(b"then");
+                        i += 2;
+                        expanded_any = true;
+                        handled = true;
+                    }
+                } else {
+                    nest += 1;
+                }
+            } else if match_keyword_at(line, i, b"until") || match_keyword_at(line, i, b"end") {
+                if nest > 0 {
+                    nest -= 1;
+                } else if ends_needed > 0 {
+                    for _ in 0..ends_needed {
+                        result.extend_from_slice(b" end");
+                    }
+                    result.push(b' ');
+                    expanded_any = true;
+                    ends_needed = 0;
+                }
+            }
+            if handled {
+                continue;
             }
         }
 
