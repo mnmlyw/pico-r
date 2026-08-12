@@ -35,7 +35,7 @@ it never runs in CI.
 |---|---|
 | `match` | every frame both engines produced was identical |
 | `diverge` | both ran; the reported frame is the first that differed |
-| `no-official` | official emitted no frames — over the 8192-token limit with the shim added, a load error, or a cart that never reaches a flip |
+| `no-official` | official emitted no frames — see the token-limit note below, a load error, or a cart that never reaches a flip |
 | `no-picor` | pico-r emitted no frames |
 
 ## Limitations — read before trusting a result
@@ -61,6 +61,17 @@ it never runs in CI.
   text loader currently writes the SFX header to the wrong end of each entry
   (a known, separate bug), so a cart that reads SFX RAM *as data* can diverge
   for that reason alone rather than because of anything this harness is testing.
+- **The 8192-token limit costs 29 carts, and shrinking the shim does not buy
+  them back.** Of the 47 `no-official` carts in the checked-in baseline, 29 are
+  ones pico-r ran fine; official rejects them with `program too large` once the
+  shim is added. They are not near-misses that a leaner shim would recover: a
+  ~20-token stub loads, the real shim does not, and a stripped variant (hash
+  only, no sum or nonzero count) was measured against them and still failed on
+  most — 1 recovery in the first 8 tested. Reaching these carts needs a
+  fundamentally cheaper channel, not a smaller shim. The most promising is
+  `extcmd("screen")`: official already writes a composited PNG with it, so a
+  near-zero-token shim would suffice if pico-r implemented the same extcmd and
+  the comparison moved to PNGs. Not attempted here.
 - **pico-r's main loop does not call the Lua-global `flip`.** Official's does,
   after `_draw`, looked up fresh each frame — confirmed against the binary,
   including honouring a mid-run swap of `flip`. That is a real divergence in its
