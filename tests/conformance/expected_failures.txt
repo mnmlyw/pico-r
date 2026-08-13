@@ -11,13 +11,3 @@
 # probe can't fully graduate regardless of correctness. Left listed rather
 # than fabricating a matching address.
 tostr-tostring-metamethod-ignored
-# tonum-hex-string-and-boolean-flag: three related divergences in api_tonum,
-# all confirmed against the console. (1) A "0x...." string parses as a hex
-# literal with NO flag -- tonum("0x0001.0000") is 1, pico-r returns nil.
-# (2) Flag 0x1 means "read the digits as hexadecimal", so "12" -> 18 (pico-r
-# agrees) but "0x0001.0000" is then not valid hex digits and yields 0, where
-# pico-r returns 1 as if it had parsed the literal. (3) A BOOLEAN flag is
-# IGNORED here -- tonum(s,true) == tonum(s) -- the OPPOSITE of tostr, where
-# true means flag 1 (fixed; see tostr-flag-accepts-boolean). pico-r returns
-# nil. Found while fixing tostr's boolean flag. src/pico_lua/api.rs (api_tonum).
-tonum-hex-string-and-boolean-flag
