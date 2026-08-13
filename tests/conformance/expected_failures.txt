@@ -11,19 +11,6 @@
 # probe can't fully graduate regardless of correctness. Left listed rather
 # than fabricating a matching address.
 tostr-tostring-metamethod-ignored
-# pairs-hash-part-bucket-order-numeric-keys: NUMERIC keys in a table's
-# hash part iterate in a deterministic, seedless bucket order on real
-# hardware (verified stable across 4 spaced runs -- unlike STRING keys,
-# whose order is genuinely random per run; the old
-# pairs-hash-part-order-nondeterministic probe goldened one such random
-# draw and was deleted as invalid evidence). Reproducing bucket order
-# requires porting lua 5.2 ltable.c's node machinery (z8lua's
-# luai_hashnum on the 16.16 raw bits, mainposition/collision chains,
-# power-of-2 rehash growth history) into pico-r's core table type -- a
-# self-contained project with near-zero real-cart impact, deferred. The
-# deterministic array-part-first facts ARE implemented and locked by
-# pairs-array-part-first-deterministic.
-pairs-hash-part-bucket-order-numeric-keys
 # shift-count-overflow-clamped-not-zeroed: shl/shr/lshr clamp the shift
 # count to 31 via .min(31)/.clamp(0,31) before shifting, so a count >= 32
 # lands on the same result as count == 31 instead of the fully-shifted-out

@@ -225,6 +225,9 @@ pub struct TableInner {
     /// this the way luaH_getn consults the array-part size.
     pub array_decl: i64,
     pub metatable: Option<Rc<Table>>,
+    /// Shadow of z8lua's real array/node layout, maintained purely so
+    /// `next()` can yield keys in the console's order. See `ltable`.
+    pub layout: crate::pico_lua::ltable::Layout,
 }
 
 impl Default for TableInner {
@@ -240,6 +243,7 @@ impl TableInner {
             array_max_hint: 0,
             array_decl: 0,
             metatable: None,
+            layout: crate::pico_lua::ltable::Layout::new(),
         }
     }
     pub fn get(&self, k: &Value) -> Value {
@@ -264,6 +268,17 @@ impl TableInner {
             if i > 0 && (i as u32) > self.array_max_hint {
                 self.array_max_hint = i as u32;
             }
+        }
+        // Mirror the write into the layout shadow before applying it. A nil
+        // store still has to be replayed: in Lua 5.2 assigning nil to an
+        // absent key creates the entry, which can rehash and even grow the
+        // array part, so skipping it here would desynchronise the order.
+        match &k {
+            Value::Number(n) => match crate::pico_lua::ltable::raw_of(*n) {
+                Some(raw) => self.layout.set(raw, !matches!(v, Value::Nil)),
+                None => self.layout.unmodelled = true,
+            },
+            _ => self.layout.unmodelled = true,
         }
         if matches!(v, Value::Nil) {
             self.map.remove(&key);

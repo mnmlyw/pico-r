@@ -416,11 +416,41 @@ fn lua_next(_i: &mut Interp, args: Vec<Value>) -> Result<Vec<Value>, RtError> {
     // bucket order that pico-r does NOT replicate (needs the full
     // ltable.c node-layout port -- see the
     // pairs-hash-part-bucket-order-numeric-keys xfail).
-    let mut keys: Vec<Key> = table.map.keys().cloned().collect();
-    keys.sort_by_key(|k| match k {
-        Key::Int(i) if *i >= 1 => (0, *i),
-        _ => (1, 0),
-    });
+    // For an all-numeric table the layout shadow reproduces the console's
+    // real array/node walk exactly (see ltable). Anything else falls back to
+    // array-part-first plus insertion order -- not a shortcut: on real
+    // hardware STRING-key order is randomised per run (z8lua seeds its string
+    // hash from the clock), so there is no stable order to match there.
+    let keys: Vec<Key> = if table.layout.unmodelled {
+        let mut ks: Vec<Key> = table.map.keys().cloned().collect();
+        ks.sort_by_key(|k| match k {
+            Key::Int(i) if *i >= 1 => (0, *i),
+            _ => (1, 0),
+        });
+        ks
+    } else {
+        // Match on raws computed FROM the stored keys rather than
+        // reconstructing a key from a raw: a stored Key::Float holds the
+        // original f64 bits, which need not survive a round trip through the
+        // 16.16 grid, so a reconstructed key can fail to match its own entry.
+        let mut by_raw: std::collections::HashMap<i32, Key> = std::collections::HashMap::new();
+        for k in table.map.keys() {
+            let n = match k {
+                Key::Int(i) => *i as f64,
+                Key::Float(bits) => f64::from_bits(*bits),
+                _ => continue,
+            };
+            if let Some(raw) = crate::pico_lua::ltable::raw_of(n) {
+                by_raw.entry(raw).or_insert_with(|| k.clone());
+            }
+        }
+        table
+            .layout
+            .order()
+            .into_iter()
+            .filter_map(|raw| by_raw.remove(&raw))
+            .collect()
+    };
     let prev_keyed = Key::from_value(&prev_key);
     let mut found = matches!(prev_key, Value::Nil);
     for k in &keys {

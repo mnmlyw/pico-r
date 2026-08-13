@@ -1,0 +1,13 @@
+RESULT fwd 300,100,200,400,
+RESULT rev 300,400,200,100,
+RESULT evens 6,4,2,8,
+RESULT dense 1,2,3,4,5,6,7,8,
+RESULT densrev 1,2,3,4,5,6,7,8,
+RESULT negzero 0,-1,-2,-3,
+RESULT mixed 1,2,3,42,1000,-5,17,
+RESULT sparse 2401,49,343,7,
+RESULT nilstore 6,5,
+RESULT dead 50,30,10,
+RESULT revive 50,30,10,|50,40,30,20,10,
+RESULT noshrink 8,
+DONE

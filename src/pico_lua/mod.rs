@@ -15,6 +15,7 @@ pub mod ast;
 pub mod coroutine;
 pub mod interp;
 pub mod lex;
+pub mod ltable;
 pub mod parse;
 pub mod serialize;
 pub mod value;
