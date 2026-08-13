@@ -1,0 +1,5 @@
+RESULT raws 0x0001.0000 0x0001.0001 equal=false
+RESULT distinct_keys 2
+RESULT frac_order 0xffd6.cac8,0x0000.9339,0x0010.2b78,0xffe4.dfe0,0xffff.92aa,0x0006.ab50,0x000b.0a5e,
+RESULT boundary 0x0002.0001,0xfffd.ffff,0x0002.0000,0xfffe.0000,
+DONE

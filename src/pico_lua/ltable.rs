@@ -40,16 +40,14 @@ pub fn raw_of(n: f64) -> Option<i32> {
     if !n.is_finite() {
         return None;
     }
-    let scaled = (n * 65536.0).round();
-    if scaled.abs() >= 9.0e18 {
-        return None;
-    }
-    // WRAPS rather than saturating or rejecting. A 16.16 value is a 32-bit
-    // register on the console, so a key past +-32767 comes back around --
-    // 32768 and -32768 are the same key there. pico-r's own f64 does not
-    // wrap (a separate divergence), but the layout must be computed on the
-    // wrapped bits or such a key lands in the wrong slot.
-    Some((scaled as i64 as u32) as i32)
+    // Delegate to the engine's own conversion rather than reimplementing it.
+    // Doing the arithmetic here independently got it wrong in a way that was
+    // easy to miss: this rounded where the console TRUNCATES, so two keys a
+    // fraction of a ULP apart (1.00001 and 1.00002, raws 0x0001.0000 and
+    // 0x0001.0001) collapsed onto one raw and the table appeared to hold one
+    // key where the console holds two. `to_fixed` also wraps past +-32767,
+    // which the layout needs, since a 16.16 value is a 32-bit register.
+    Some(crate::pico_lua::value::to_fixed(n))
 }
 
 fn is_int_key(raw: i32) -> bool {
