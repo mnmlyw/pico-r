@@ -877,7 +877,17 @@ fn api_tostr(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         return Ok(vec![str_v(b"")]);
     }
     let v = a[0].clone();
-    let flags = arg_int(&a, 1).unwrap_or(0);
+    // `tostr(x, true)` is the documented spelling of the hex flag and is by
+    // far the common one in real carts, but a boolean is not a number, so the
+    // ordinary numeric-argument path drops it and silently formats as decimal.
+    // Confirmed against official: `true` means flag 1 and `false` means 0.
+    // (Note tonum() does NOT mirror this -- there a boolean flag is ignored
+    // entirely, so `tonum(s,true)` == `tonum(s)`. Same spelling, different
+    // rule; see the tonum-hex-string-and-boolean-flag probe.)
+    let flags = match a.get(1) {
+        Some(Value::Bool(b)) => i32::from(*b),
+        _ => arg_int(&a, 1).unwrap_or(0),
+    };
     if flags != 0 {
         // On a table/function, the 0x1 (identity) flag switches from the
         // "[table]"/"[function]" display form to "table: 0xADDR" /

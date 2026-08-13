@@ -1,0 +1,9 @@
+RESULT hexstr_none 1
+RESULT hexstr_f1 0
+RESULT hexstr_true 1
+RESULT dec_none 12
+RESULT dec_f1 18
+RESULT dec_true 12
+RESULT bad_none [nil]
+RESULT bad_f4 0
+DONE
