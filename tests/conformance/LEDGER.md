@@ -951,3 +951,25 @@ Fixed by deleting the hand-rolled arithmetic and delegating to `value::to_fixed`
 **The 240-case random comparison now passes 240/240, up from 202/240.** Locked by `pairs-fractional-key-quantisation`, which pins the truncation boundary in both directions, the resulting key identity, and fractional iteration order. Corpus sweep: zero exit-code changes, zero byte-count changes.
 
 Also worth recording, since it nearly cost a day: that 240-case comparison originally reported 239 mismatches, which looked like a catastrophic ordering failure. The cause was Round 63's `tostr(x,true)` bug in the comparison's own output formatting, making the two sides incomparable. Once that was fixed the same harness read straight through. | `src/pico_lua/ltable.rs` (`raw_of`)
+
+### Round 65: shift direction/overflow and `split()`'s non-string gate -- two xfails, both with WRONG checked-in diagnoses
+
+Two long-standing xfails closed. Both notes describing them were wrong, and in one case following the note would have produced a fabricated fix that still passed CI.
+
+**`split()` with a non-string first argument.** `expected_failures.txt` recorded that official raises a runtime error aborting the cart, and that pico-r wrongly substitutes `""`. Measured directly: official raises NOTHING and the cart continues -- it returns **zero values**. `select('#', split(nil))` is 0 where `split("a,b")` gives 1, which is the only way to tell "no values" from "one nil value" and is precisely what the old note could not have distinguished. Numbers ARE accepted (`split(12)` yields `{12}`), via the same conversion `tostr()` uses. Fixed by gating on `arg_str` and returning `Ok(vec![])`; the old coercion silently changed the arity of every caller.
+
+**Shift counts.** The note recorded two divergences (counts >= 32 should shift fully out; `shl` with a negative count should be logical). Both hold, and there is a **third the note and its probe never mention**: `lshr(x, n<0)` is a LEFT shift on the console, where pico-r clamped the count to 0 and returned `x` unchanged. In a 500-case fuzz that third case was the single largest source of divergence -- more than the two documented ones combined.
+
+The whole rule is one dispatch table: a negative count runs the mirror-image shift, and every direction reversal is LOGICAL.
+
+| fn | n >= 0 | n < 0 |
+|---|---|---|
+| `shl` | `LSL(v,n)` | `LSR(v,-n)` |
+| `shr` | `ASR(v,n)` | `LSL(v,-n)` |
+| `lshr` | `LSR(v,n)` | `LSL(v,-n)` |
+
+`|count| >= 32` shifts fully out -- it neither saturates at 31 nor wraps mod 32. The count is FLOORED, not truncated, so a count of `-0.5` shifts by `-1` and therefore reverses direction rather than doing nothing. Note `ASR(v, k>=32)` is bit-identical to `ASR(v,31)`, so `shr`'s positive branch was unobservably correct before -- the other three clamp sites were all observable and wrong. `rotl`/`rotr` were checked at the same time and are already correct (count mod 32).
+
+Verified with an 828-case fuzz over asymmetric bit-31-set operands and counts in [-70,70]: all 828 match. Locked by `shift-negative-count-reverses-and-is-logical` and `split-non-string-returns-no-values`. Corpus sweep: zero exit-code changes, zero byte-count changes.
+
+One probe-design note worth keeping: the first version of the shift probe passed operands as STRINGS (`shl("0xdead.beef",n)`) and goldened as all zeros, because the console coerces that particular string to 0 in an arithmetic context while pico-r parses it -- a separate divergence in hex-fraction string coercion, not yet investigated. Rewritten with numeric literals so it tests the shift rule rather than the coercion.

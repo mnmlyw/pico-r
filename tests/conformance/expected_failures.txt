@@ -11,24 +11,6 @@
 # probe can't fully graduate regardless of correctness. Left listed rather
 # than fabricating a matching address.
 tostr-tostring-metamethod-ignored
-# shift-count-overflow-clamped-not-zeroed: shl/shr/lshr clamp the shift
-# count to 31 via .min(31)/.clamp(0,31) before shifting, so a count >= 32
-# lands on the same result as count == 31 instead of the fully-shifted-out
-# value (0 for a left/logical shift, sign-extended 0/-1 for the arithmetic
-# right shift). Also found in the same probe: shl(x, n) for n < 0 delegates
-# to Rust's wrapping_shr (arithmetic, sign-preserving) but official PICO-8
-# treats a negative shl count as a LOGICAL right shift (matches lshr, not
-# shr) even for in-range counts -- shl(-1,-1) == lshr(-1,1) on real
-# hardware, not shr(-1,1). Both are real, generalizable rules in
-# src/pico_lua/api.rs's api_shl/api_shr/api_lshr, not probe-specific.
-shift-count-overflow-clamped-not-zeroed
-# split-nil-first-arg-no-error: api_split's arg_str(&a,0) falls back to an
-# empty byte string when arg 0 is nil/omitted instead of raising a runtime
-# error the way official PICO-8's split() does (a checklstring-style arg
-# check) -- pico-r has an established Err(RtError::msg(...)) pattern used
-# elsewhere in api.rs (setmetatable, rawset, cocreate) for exactly this.
-# src/pico_lua/api.rs (api_split).
-split-nil-first-arg-no-error
 # tonum-hex-string-and-boolean-flag: three related divergences in api_tonum,
 # all confirmed against the console. (1) A "0x...." string parses as a hex
 # literal with NO flag -- tonum("0x0001.0000") is 1, pico-r returns nil.

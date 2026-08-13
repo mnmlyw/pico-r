@@ -1,0 +1,12 @@
+RESULT n_nil 0
+RESULT n_none 0
+RESULT n_bool 0
+RESULT n_tbl 0
+RESULT n_str 1
+RESULT n_num 1
+RESULT num_val table 12
+RESULT frac_val 0.3333
+RESULT n_nil_sep 0
+RESULT n_nil_conv 0
+RESULT alive yes
+DONE

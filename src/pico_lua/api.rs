@@ -803,30 +803,62 @@ fn api_bnot(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
         arg_num(&a, 0).unwrap_or(0.0),
     )))])
 }
+// The three shifts share one rule, measured over 3133 oracle observations.
+// A NEGATIVE count runs the mirror-image shift, and every direction reversal
+// is LOGICAL -- so shl(x,-n) == lshr(x,n), and lshr(x,-n) is a LEFT shift
+// rather than the no-op pico-r used to return. |count| >= 32 shifts fully
+// out; it does not saturate at 31 and does not wrap mod 32. (Sign-extending
+// ASR is the one case where >= 32 and == 31 agree, so shr's positive branch
+// was unobservably correct before.)
+fn lsl32(v: i32, k: u32) -> i32 {
+    if k >= 32 {
+        0
+    } else {
+        ((v as u32) << k) as i32
+    }
+}
+fn lsr32(v: i32, k: u32) -> i32 {
+    if k >= 32 {
+        0
+    } else {
+        ((v as u32) >> k) as i32
+    }
+}
+fn asr32(v: i32, k: u32) -> i32 {
+    if k >= 32 {
+        v >> 31
+    } else {
+        v >> k
+    }
+}
+/// Split a shift count into (magnitude, reversed?). The count is floored, not
+/// truncated -- a count of -0.5 shifts by -1, so it reverses direction rather
+/// than doing nothing. `arg_int` already floors.
+fn shift_count(a: &[Value]) -> (u32, bool) {
+    let n = arg_int(a, 1).unwrap_or(0);
+    if n >= 0 {
+        (n as u32, false)
+    } else {
+        ((n as i64).unsigned_abs() as u32, true)
+    }
+}
 fn api_shl(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let x = to_fixed(arg_num(&a, 0).unwrap_or(0.0));
-    let b = arg_int(&a, 1).unwrap_or(0);
-    let r = if b >= 0 {
-        x.wrapping_shl((b.min(31)) as u32)
-    } else {
-        x.wrapping_shr(((-b).min(31)) as u32)
-    };
+    let (k, rev) = shift_count(&a);
+    let r = if rev { lsr32(x, k) } else { lsl32(x, k) };
     Ok(vec![num(from_fixed(r))])
 }
 fn api_shr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let x = to_fixed(arg_num(&a, 0).unwrap_or(0.0));
-    let b = arg_int(&a, 1).unwrap_or(0);
-    let r = if b >= 0 {
-        x.wrapping_shr((b.min(31)) as u32)
-    } else {
-        x.wrapping_shl(((-b).min(31)) as u32)
-    };
+    let (k, rev) = shift_count(&a);
+    let r = if rev { lsl32(x, k) } else { asr32(x, k) };
     Ok(vec![num(from_fixed(r))])
 }
 fn api_lshr(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let x = to_fixed(arg_num(&a, 0).unwrap_or(0.0)) as u32;
-    let b = arg_int(&a, 1).unwrap_or(0).clamp(0, 31) as u32;
-    Ok(vec![num(from_fixed((x >> b) as i32))])
+    let x = to_fixed(arg_num(&a, 0).unwrap_or(0.0));
+    let (k, rev) = shift_count(&a);
+    let r = if rev { lsl32(x, k) } else { lsr32(x, k) };
+    Ok(vec![num(from_fixed(r))])
 }
 fn api_rotl(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let x = to_fixed(arg_num(&a, 0).unwrap_or(0.0)) as u32;
@@ -1112,7 +1144,20 @@ fn parse_radix_fraction(s: &str, radix: u32) -> Option<f64> {
 }
 
 fn api_split(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    let s = arg_str(&a, 0).unwrap_or_else(|| Rc::from(&[][..]));
+    // A first argument that is neither a string nor a number yields ZERO
+    // return values -- not nil, not an empty table, and NOT an error. The
+    // cart carries on, and `select('#', split(nil))` is 0 where a string
+    // gives 1. Coercing to "" instead (the old behaviour) returns one value
+    // and silently changes the arity of every caller.
+    //
+    // Note expected_failures.txt described this as official raising a
+    // runtime error that aborts the cart. That was wrong: measured directly,
+    // nil/boolean/table/omitted all return zero values and execution
+    // continues. A fix written to that note would have been fabricated and
+    // would still have passed CI.
+    let Some(s) = arg_str(&a, 0) else {
+        return Ok(vec![]);
+    };
     let convert = if a.len() <= 2 || matches!(a.get(2), Some(Value::Nil)) {
         true
     } else {
