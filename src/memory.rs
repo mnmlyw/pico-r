@@ -129,28 +129,60 @@ impl Memory {
         Self::page_base(self.ram[ADDR_SCREEN_PAGE as usize], ADDR_SCREEN)
     }
 
-    pub fn init_draw_state(&mut self) {
+    /// The hardware-register default table for 0x5F00..0x5F7F, dumped off the
+    /// console by dirtying the whole range to 0xA5 and calling `reset()`.
+    /// Addresses not written below are zero.
+    ///
+    /// Notable entries pico-r previously left unset: 0x5F5E (bitplane mask)
+    /// defaults to 0xFF, not 0, and the secondary palette at 0x5F60..0x5F6F
+    /// has a fixed non-identity pattern that is factory data, not a formula.
+    fn write_hw_defaults(&mut self) {
+        for a in ADDR_DRAW_STATE as usize..=0x5F7F {
+            self.ram[a] = 0;
+        }
         for i in 0..16 {
             self.ram[ADDR_DRAW_PAL as usize + i] = i as u8;
             self.ram[ADDR_SCREEN_PAL as usize + i] = i as u8;
         }
-        self.ram[ADDR_CLIP_LEFT as usize] = 0;
-        self.ram[ADDR_CLIP_TOP as usize] = 0;
+        self.ram[ADDR_DRAW_PAL as usize] |= 0x10;
         self.ram[ADDR_CLIP_RIGHT as usize] = 128;
         self.ram[ADDR_CLIP_BOTTOM as usize] = 128;
         self.ram[ADDR_COLOR as usize] = 6;
-        self.poke16(ADDR_CAMERA_X, 0);
-        self.poke16(ADDR_CAMERA_Y, 0);
-        self.ram[ADDR_CURSOR_X as usize] = 0;
-        self.ram[ADDR_CURSOR_Y as usize] = 0;
-        self.poke16(ADDR_FILL_PAT, 0);
-        self.poke16(ADDR_FILL_PAT.wrapping_add(2), 0);
-        self.ram[ADDR_DRAW_PAL as usize] |= 0x10;
-        // Sprite/screen page defaults: sprite reads from 0x0000, draws go to 0x6000.
         self.ram[ADDR_SPRITE_PAGE as usize] = 0x00;
         self.ram[ADDR_SCREEN_PAGE as usize] = 0x60;
-        self.ram[ADDR_MAP_WIDTH as usize] = 128;
         self.ram[0x5F56] = 0x20;
+        self.ram[ADDR_MAP_WIDTH as usize] = 128;
+        self.ram[0x5F5E] = 0xFF;
+        const P2_PALETTE: [u8; 16] = [
+            0, 1, 18, 19, 36, 21, 214, 103, 72, 73, 154, 59, 220, 93, 142, 239,
+        ];
+        for (i, v) in P2_PALETTE.iter().enumerate() {
+            self.ram[0x5F60 + i] = *v;
+        }
+    }
+
+    pub fn init_draw_state(&mut self) {
+        self.write_hw_defaults();
+    }
+
+    /// `reset()`. Restores the same defaults as boot with one exception,
+    /// measured on the console: the print cursor's three bytes -- home-x
+    /// (0x5F24) and x/y (0x5F26/0x5F27) -- are NOT restored, keeping whatever
+    /// the cart last left there.
+    ///
+    /// Not reproduced: the console's `reset()` also re-seeds the RNG, whose
+    /// state is memory-mapped at 0x5F44..0x5F4B there (srand() visibly
+    /// rewrites those bytes). pico-r keeps its PRNG state outside RAM
+    /// entirely, so those eight bytes read as zero here regardless -- a
+    /// distinct, pre-existing gap rather than something this function can fix.
+    pub fn reset_hw_registers(&mut self) {
+        let cursor_home = self.ram[0x5F24];
+        let cursor_x = self.ram[ADDR_CURSOR_X as usize];
+        let cursor_y = self.ram[ADDR_CURSOR_Y as usize];
+        self.write_hw_defaults();
+        self.ram[0x5F24] = cursor_home;
+        self.ram[ADDR_CURSOR_X as usize] = cursor_x;
+        self.ram[ADDR_CURSOR_Y as usize] = cursor_y;
     }
 
     pub fn save_rom(&mut self) {

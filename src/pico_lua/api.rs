@@ -2879,7 +2879,7 @@ fn api_flip(i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     Ok(vec![])
 }
 fn api_reset(i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    i.host().memory.init_draw_state();
+    i.host().memory.reset_hw_registers();
     Ok(vec![])
 }
 fn api_stop(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
