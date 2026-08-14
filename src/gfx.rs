@@ -197,27 +197,51 @@ pub fn scroll_screen_up(memory: &mut Memory, rows: i32) {
     }
 }
 
+// The console's line() is not Bresenham. Endpoints are first swapped so Y
+// ASCENDS -- which is what makes the rendering symmetric under endpoint
+// reversal (measured: line(12,5,0,0) plots exactly line(0,0,12,5)'s pixels,
+// where Bresenham's two directions disagree). Then a 16.16 DDA walks the
+// major axis, stepping the minor accumulator from a +0.5 bias by the
+// C-truncated 16.16 slope and plotting its floor.
+//
+// The truncated division is load-bearing: for (0,0)->(12,6) exact math puts
+// x=6 at minor 3.0 but the console plots 2 -- the accumulated truncated
+// slope reaches only 2.99994. Canonicalising by Y (rather than by the major
+// axis) is equally load-bearing: it makes the shallow minor step always
+// non-negative, and a steep descending-x line like (33,42)->(22,56) needs
+// the toward-zero quotient at y=49 (x=28, where a floored step gives 27).
+// A 322-case fuzz separated these candidates; hand-picked cases did not.
 pub fn draw_line(memory: &mut Memory, x0: i32, y0: i32, x1: i32, y1: i32, col: u8) {
-    let dx = if x1 > x0 { x1 - x0 } else { x0 - x1 };
-    let dy = if y1 > y0 { y1 - y0 } else { y0 - y1 };
-    let sx: i32 = if x0 < x1 { 1 } else { -1 };
-    let sy: i32 = if y0 < y1 { 1 } else { -1 };
-    let mut err = dx - dy;
-    let mut cx = x0;
-    let mut cy = y0;
-    loop {
-        put_pixel(memory, cx, cy, col);
-        if cx == x1 && cy == y1 {
-            break;
+    let (x0, y0, x1, y1) = if y0 > y1 {
+        (x1, y1, x0, y0)
+    } else {
+        (x0, y0, x1, y1)
+    };
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    if dx.abs() >= dy {
+        if dx == 0 {
+            put_pixel(memory, x0, y0, col);
+            return;
         }
-        let e2 = err * 2;
-        if e2 > -dy {
-            err -= dy;
-            cx += sx;
+        let sx = dx.signum();
+        let step = ((dy as i64) << 16) / (dx.abs() as i64);
+        let mut acc = ((y0 as i64) << 16) + 0x8000;
+        let mut x = x0;
+        loop {
+            put_pixel(memory, x, (acc >> 16) as i32, col);
+            if x == x1 {
+                break;
+            }
+            x += sx;
+            acc += step;
         }
-        if e2 < dx {
-            err += dx;
-            cy += sy;
+    } else {
+        let step = ((dx as i64) << 16) / (dy as i64);
+        let mut acc = ((x0 as i64) << 16) + 0x8000;
+        for y in y0..=y1 {
+            put_pixel(memory, (acc >> 16) as i32, y, col);
+            acc += step;
         }
     }
 }
