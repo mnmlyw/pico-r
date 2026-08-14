@@ -1,0 +1,7 @@
+RESULT first false
+RESULT fresh_dget0 0
+RESULT after_dset 42 7
+RESULT ram 0 0 42 0
+RESULT recall false dget0=0
+RESULT oob 0 0
+DONE

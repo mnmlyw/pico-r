@@ -2556,8 +2556,31 @@ fn api_printh(_i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     }
     Ok(vec![])
 }
-fn api_cartdata(_i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
-    Ok(vec![boolv(true)])
+fn api_cartdata(i: &mut Interp, _a: Vec<Value>) -> Result<Vec<Value>, RtError> {
+    // Returns whether a save for this id ALREADY EXISTED, and (re)loads the
+    // 256-byte cartdata window from it -- so a fresh save reports false and
+    // zeroes 0x5E00..0x5EFF. Measured on the console: two runs against the
+    // same -home give false then true, and within a SINGLE run repeated
+    // cartdata() calls all report false, because the file is only written
+    // back at exit; each call also re-zeroes the region, discarding dset()s
+    // made before it.
+    //
+    // Returning a bare `true` (what this used to do) is the worst possible
+    // answer for real carts: the usual idiom is
+    // `if cartdata(id) then load_progress() end`, so every cart took its
+    // "returning player" branch and then read a window of zeros.
+    //
+    // This host has no save file, so no save can pre-exist and the honest
+    // answer is always false. Persisting across runs would need a
+    // filesystem-backed store keyed by id (the console writes
+    // <home>/cdata/<id>.p8d.txt, 8 lines of 64 hex chars, one %08x per
+    // 4-byte slot), which is deliberately not implemented here rather than
+    // faked -- and could not work on the wasm build regardless.
+    let st = i.host();
+    for a in 0..256u16 {
+        st.memory.ram[(mem::ADDR_CART_DATA + a) as usize] = 0;
+    }
+    Ok(vec![boolv(false)])
 }
 fn api_dget(i: &mut Interp, a: Vec<Value>) -> Result<Vec<Value>, RtError> {
     let idx = arg_int(&a, 0).unwrap_or(0);

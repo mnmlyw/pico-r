@@ -1024,3 +1024,15 @@ Dumped that table directly: dirty 0x5F00..0x5F7F to 0xA5, call `reset()`, read i
 **Deliberately not reproduced, and the reason is worth recording:** the console's `reset()` also re-seeds the RNG, and on real hardware the PRNG state is *memory-mapped* at 0x5F44..0x5F4B -- `srand(1)` visibly rewrites those eight bytes, and they differ between boot and post-reset. pico-r keeps its PRNG entirely outside RAM, so that window reads zero no matter what `reset()` does. That is a distinct pre-existing gap (RNG state not memory-mapped), not something this function can fix, and the probe masks those eight bytes out rather than goldening them: they vary run to run on the console, so a golden over them would capture a coin flip.
 
 Corpus sweep: zero exit-code changes, zero byte-count changes, despite boot state now setting 0x5F5E and the secondary palette that were previously left at zero. | `src/memory.rs` (`write_hw_defaults`, `reset_hw_registers`), `src/pico_lua/api.rs` (`api_reset`)
+
+### Round 69: `cartdata()` always claimed a save already existed
+
+`api_cartdata` was a one-liner returning `true`. The console returns whether a save for that id ALREADY EXISTED -- false when it creates a fresh one -- and (re)loads the 256-byte window at 0x5E00 from it, so a fresh save reads as zeros. Two runs against the same `-home` give false then true.
+
+Returning a bare `true` is close to the worst available answer, because the near-universal cart idiom is `if cartdata(id) then load_progress() end`: every cart took its "returning player" branch and then read a window of zeros, so saved-progress state came back as all-defaults-but-claimed-valid rather than cleanly absent.
+
+Two further behaviours pinned while measuring, both non-obvious: within a SINGLE run repeated `cartdata()` calls all report false -- the file is only written back at exit -- and each call **re-zeroes the region, discarding any `dset()` made before it**. `dget`/`dset` themselves were already correct (index i is the little-endian 16.16 raw at 0x5E00 + i*4; out-of-range reads 0 without erroring).
+
+This host has no save file, so no save can pre-exist and the honest answer is always false, which is exactly what the console does on a fresh `-home` -- the condition every conformance probe runs under. Persisting across runs would need a filesystem-backed store keyed by id (the console writes `<home>/cdata/<id>.p8d.txt`: 8 lines of 64 hex chars, one `%08x` per 4-byte slot, verified by reading the file back). That is deliberately NOT implemented rather than faked, and could not work on the wasm build anyway.
+
+Corpus: zero exit-code changes; two carts move, both `cartdata` users now taking their new-player branch -- `porterpatch1-1` (681 -> 698) and `to_take_root_among_the_stars_1-7` (6415 -> 8191). The latter is adjudicated against the console rather than assumed: it goes from **diverging at frame 1 to matching all 20 frames** under `tools/diffharness/`. That is the same cart whose save-flag bitmasks drove the Round 57 bitwise-precedence work; it needed both fixes to become conformant. | `src/pico_lua/api.rs` (`api_cartdata`)
