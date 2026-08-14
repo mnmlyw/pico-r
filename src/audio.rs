@@ -368,7 +368,7 @@ impl Audio {
             return;
         }
         let base = memory::ADDR_SFX as usize + sfx_id as usize * 68;
-        let note_addr = base + 4 + self.channels[ch].note_index as usize * 2;
+        let note_addr = base + self.channels[ch].note_index as usize * 2;
         let lo = memory.ram[note_addr];
         let hi = memory.ram[note_addr + 1];
         let val16 = (lo as u16) | ((hi as u16) << 8);
@@ -409,7 +409,7 @@ impl Audio {
 
     fn read_note_raw(&self, memory: &Memory, sfx_id: u8, note_index: u8) -> (u8, u8, u8, u8) {
         let base = memory::ADDR_SFX as usize + sfx_id as usize * 68;
-        let note_addr = base + 4 + note_index as usize * 2;
+        let note_addr = base + note_index as usize * 2;
         let lo = memory.ram[note_addr];
         let hi = memory.ram[note_addr + 1];
         let val16 = (lo as u16) | ((hi as u16) << 8);
@@ -464,7 +464,7 @@ impl Audio {
                     let lfo_step = ((lfo_phase * 4.0) as u8).min(3);
                     let target = note_group + lfo_step;
                     if target < 32 {
-                        let addr = sfx_base + 4 + target as usize * 2;
+                        let addr = sfx_base + target as usize * 2;
                         let lo2 = memory.ram[addr];
                         let hi2 = memory.ram[addr + 1];
                         let pitch2 = ((lo2 as u32 | ((hi2 as u32) << 8)) & 0x3F) as u8;
@@ -477,7 +477,7 @@ impl Audio {
                     let lfo_step = ((lfo_phase * 4.0) as u8).min(3);
                     let target = note_group + lfo_step;
                     if target < 32 {
-                        let addr = sfx_base + 4 + target as usize * 2;
+                        let addr = sfx_base + target as usize * 2;
                         let lo2 = memory.ram[addr];
                         let hi2 = memory.ram[addr + 1];
                         let pitch2 = ((lo2 as u32 | ((hi2 as u32) << 8)) & 0x3F) as u8;
@@ -518,14 +518,14 @@ impl Audio {
                 }
                 self.channels[i].inst_phase += child_freq / SAMPLE_RATE as f64;
 
-                let inst_speed = memory.ram[inst_base + 1];
+                let inst_speed = memory.ram[inst_base + memory::SFX_HEADER_OFF + 1];
                 let inst_samples = (inst_speed as u32).max(1) * SAMPLES_PER_TICK;
                 self.channels[i].inst_sub_tick += 1.0;
                 if self.channels[i].inst_sub_tick >= inst_samples as f32 {
                     self.channels[i].inst_sub_tick = 0.0;
                     self.channels[i].inst_note_index += 1;
-                    let inst_loop_end = memory.ram[inst_base + 3];
-                    let inst_loop_start = memory.ram[inst_base + 2];
+                    let inst_loop_end = memory.ram[inst_base + memory::SFX_HEADER_OFF + 3];
+                    let inst_loop_start = memory.ram[inst_base + memory::SFX_HEADER_OFF + 2];
                     if self.channels[i].inst_note_index >= 32 {
                         if inst_loop_end > 0 && inst_loop_start < inst_loop_end {
                             self.channels[i].inst_note_index = inst_loop_start;
@@ -556,7 +556,7 @@ impl Audio {
 
             self.channels[i].phase += self.channels[i].frequency / SAMPLE_RATE as f64;
 
-            let speed = memory.ram[sfx_base + 1];
+            let speed = memory.ram[sfx_base + memory::SFX_HEADER_OFF + 1];
             let samples_per_note = (speed as u32).max(1) * SAMPLES_PER_TICK;
 
             self.channels[i].sub_tick += 1.0;
@@ -581,8 +581,8 @@ impl Audio {
                     }
                 }
 
-                let loop_end = memory.ram[sfx_base + 3];
-                let loop_start = memory.ram[sfx_base + 2];
+                let loop_end = memory.ram[sfx_base + memory::SFX_HEADER_OFF + 3];
+                let loop_start = memory.ram[sfx_base + memory::SFX_HEADER_OFF + 2];
 
                 if self.channels[i].note_index >= 32 {
                     self.channels[i].finished = true;

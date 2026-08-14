@@ -361,10 +361,16 @@ fn parse_sfx_line(memory: &mut Memory, line: &[u8], row: usize) {
     let loop_start = (hex_val(line[4]) << 4) | hex_val(line[5]);
     let loop_end = (hex_val(line[6]) << 4) | hex_val(line[7]);
 
-    memory.ram[base] = (hex_val(line[0]) << 4) | hex_val(line[1]);
-    memory.ram[base + 1] = speed;
-    memory.ram[base + 2] = loop_start;
-    memory.ram[base + 3] = loop_end;
+    // The 4-byte header lives at the END of the 68-byte entry, AFTER the 64
+    // bytes of note data -- not at the start. Measured on the console: a text
+    // cart whose sfx line begins `01234567` reads back 1,35,69,103 at
+    // 0x3200+64..67 with note data at 0x3200+0. Writing it at the front
+    // rotated every entry by 4 bytes, so speed/loop were read out of note 0
+    // and every note landed two notes late.
+    memory.ram[base + memory::SFX_HEADER_OFF] = (hex_val(line[0]) << 4) | hex_val(line[1]);
+    memory.ram[base + memory::SFX_HEADER_OFF + 1] = speed;
+    memory.ram[base + memory::SFX_HEADER_OFF + 2] = loop_start;
+    memory.ram[base + memory::SFX_HEADER_OFF + 3] = loop_end;
 
     for note_i in 0..32 {
         let off = 8 + note_i * 5;
@@ -385,7 +391,7 @@ fn parse_sfx_line(memory: &mut Memory, line: &[u8], row: usize) {
         let byte0 = (pitch & 0x3F) | ((waveform & 0x3) << 6);
         let byte1 = ((waveform >> 2) & 0x1) | (volume << 1) | (effect << 4) | (custom << 7);
 
-        let note_addr = base + 4 + note_i * 2;
+        let note_addr = base + note_i * 2;
         memory.ram[note_addr] = byte0;
         memory.ram[note_addr + 1] = byte1;
     }

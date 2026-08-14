@@ -71,10 +71,19 @@ __music__\n\
     assert_eq!(state.memory.ram[memory::ADDR_FLAGS as usize], 0xff);
     assert_eq!(state.memory.ram[memory::ADDR_FLAGS as usize + 1], 0x00);
     assert_eq!(state.memory.map_get(0, 0), 0x2a);
+    // The sfx line's 4-byte {mode,speed,loop_start,loop_end} header lands at
+    // the END of the 68-byte entry, after the 64 bytes of note data. This
+    // assertion used to expect it at +0..3, which is where pico-r's loader
+    // wrongly put it -- a hand-written assertion of our own behaviour, not a
+    // console-captured golden, so it was encoding the bug rather than
+    // catching it. Console-measured; see page/sfx layout notes in LEDGER.md.
+    let sfx = memory::ADDR_SFX as usize + memory::SFX_HEADER_OFF;
+    assert_eq!(state.memory.ram[sfx], 0x00);
+    assert_eq!(state.memory.ram[sfx + 1], 0x01);
+    assert_eq!(state.memory.ram[sfx + 2], 0x02);
+    assert_eq!(state.memory.ram[sfx + 3], 0x03);
+    // ...and the note area ahead of it is untouched by a header-only line.
     assert_eq!(state.memory.ram[memory::ADDR_SFX as usize], 0x00);
-    assert_eq!(state.memory.ram[memory::ADDR_SFX as usize + 1], 0x01);
-    assert_eq!(state.memory.ram[memory::ADDR_SFX as usize + 2], 0x02);
-    assert_eq!(state.memory.ram[memory::ADDR_SFX as usize + 3], 0x03);
     assert_eq!(state.memory.ram[memory::ADDR_MUSIC as usize] & 0x80, 0x80);
 }
 

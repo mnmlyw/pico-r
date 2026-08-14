@@ -7,6 +7,10 @@ pub const ADDR_MAP: u16 = 0x2000;
 pub const ADDR_FLAGS: u16 = 0x3000;
 pub const ADDR_MUSIC: u16 = 0x3100;
 pub const ADDR_SFX: u16 = 0x3200;
+/// One SFX entry is 68 bytes: 32 little-endian note words at +0..63, then a
+/// {mode, speed, loop_start, loop_end} header at +64..67. Console-measured;
+/// pico-r used to place the header first, rotating every entry by 4 bytes.
+pub const SFX_HEADER_OFF: usize = 64;
 pub const ADDR_GENERAL: u16 = 0x4300;
 pub const ADDR_CART_DATA: u16 = 0x5E00;
 pub const ADDR_DRAW_STATE: u16 = 0x5F00;
